@@ -1,23 +1,9 @@
 use glfw::{Action, Context, Key};
 use std::convert::TryInto;
 
-extern "system" fn gl_debug_callback(
-    _source: u32,
-    _type: u32,
-    _id: u32,
-    _sev: u32,
-    _length: i32,
-    msg: *const i8,
-    _data: *mut std::ffi::c_void,
-) -> () {
-    println!("OpenGL errored: {:?}", unsafe {
-        std::ffi::CString::from_raw(std::mem::transmute(msg))
-    });
-}
-
 fn main() {
     let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
-    glfw.window_hint(glfw::WindowHint::ContextVersion(4, 1));
+    glfw.window_hint(glfw::WindowHint::ContextVersion(4, 5));
     glfw.window_hint(glfw::WindowHint::OpenGlProfile(
         glfw::OpenGlProfileHint::Core,
     ));
@@ -27,6 +13,8 @@ fn main() {
 
     window.make_current();
     window.set_resizable(true);
+    window.set_cursor_pos_polling(true);
+    window.set_mouse_button_polling(true);
     window.set_key_polling(true);
     window.set_size_polling(true);
 
@@ -173,6 +161,35 @@ fn main() {
         }
 
         unsafe {
+            let view_matrix = glam::Mat4::look_at_rh(
+                // CAMERA_POS,
+                CAMERA_POS,
+                LOOK_AT,
+                glam::Vec3::new(0.0, 1.0, 0.0),
+            );
+
+            let proj_matrix = glam::Mat4::perspective_rh_gl(90.0f32.to_radians(), 1.0, 0.1, 1000.0);
+
+            let view_name = std::ffi::CString::new("u_view").unwrap();
+            let loc = gl::GetUniformLocation(program, view_name.as_ptr() as *const i8);
+            gl::ProgramUniformMatrix4fv(
+                program,
+                loc,
+                1,
+                gl::FALSE,
+                view_matrix.to_cols_array().as_ptr(),
+            );
+
+            let proj_name = std::ffi::CString::new("u_proj").unwrap();
+            let other_loc = gl::GetUniformLocation(program, proj_name.as_ptr() as *const i8);
+            gl::ProgramUniformMatrix4fv(
+                program,
+                other_loc,
+                1,
+                gl::FALSE,
+                proj_matrix.to_cols_array().as_ptr(),
+            );
+
             gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
             gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
             gl::BindVertexArray(vao);
@@ -187,6 +204,12 @@ fn main() {
     }
 }
 
+static mut MOUSE_X_POS: f64 = 0.0;
+static mut MOUSE_Y_POS: f64 = 0.0;
+static mut CAMERA_POS: glam::Vec3 = glam::Vec3::Z;
+static mut LOOK_AT: glam::Vec3 = glam::Vec3::ZERO;
+static mut IS_PANNING: bool = false;
+
 fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
     match event {
         glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => window.set_should_close(true),
@@ -197,6 +220,33 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
                 gl::Viewport(0, 0, new_x, new_y);
             }
         }
+        glfw::WindowEvent::MouseButton(glfw::MouseButton::Button3, glfw::Action::Press, _) => {
+            println!("Middle button depressed.");
+            unsafe {
+                IS_PANNING = true;
+            }
+        }
+        glfw::WindowEvent::MouseButton(glfw::MouseButton::Button3, glfw::Action::Release, _) => {
+            println!("Middle button depressed.");
+            unsafe {
+                IS_PANNING = false;
+            }
+        }
+        glfw::WindowEvent::CursorPos(x, y) => {
+            println!("Mouse at {}, {}", x, y);
+            unsafe {
+                if IS_PANNING {
+                    CAMERA_POS +=
+                        glam::Vec3::new(-(x - MOUSE_X_POS) as f32, (y - MOUSE_Y_POS) as f32, 0.0)
+                            * 0.002;
+                    LOOK_AT +=
+                        glam::Vec3::new(-(x - MOUSE_X_POS) as f32, (y - MOUSE_Y_POS) as f32, 0.0)
+                            * 0.002;
+                }
+                MOUSE_X_POS = x;
+                MOUSE_Y_POS = y;
+            }
+        }
         _ => {}
     }
 }
@@ -204,8 +254,12 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
 const VERTEX_SOURCE: &'static str = "
 #version 330 core
 layout (location = 0) in vec3 a_pos;
+
+uniform mat4 u_view;
+uniform mat4 u_proj;
+
 void main() {
-  gl_Position = vec4(a_pos.x, a_pos.y, a_pos.z, 1.0);
+  gl_Position = u_proj * u_view * vec4(a_pos.x, a_pos.y, a_pos.z, 1.0);
 }
 ";
 
@@ -218,3 +272,17 @@ void main() {
   FragColor = vec4(0.8, 0.0, 0.1, 1.0);
 }
 ";
+
+extern "system" fn gl_debug_callback(
+    _source: u32,
+    _type: u32,
+    _id: u32,
+    _sev: u32,
+    _length: i32,
+    msg: *const i8,
+    _data: *mut std::ffi::c_void,
+) -> () {
+    println!("OpenGL errored: {:?}", unsafe {
+        std::ffi::CString::from_raw(std::mem::transmute(msg))
+    });
+}

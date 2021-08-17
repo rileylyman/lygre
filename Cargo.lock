@@ -101,7 +101,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lymux"
+name = "lygre"
 version = "0.1.0"
 dependencies = [
  "gl",
