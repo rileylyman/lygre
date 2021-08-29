@@ -1,6 +1,35 @@
 use glfw::{Action, Context, Key};
 use std::convert::TryInto;
 
+enum CameraPosition {
+    SphericalAbout {
+        origin: glam::Vec3,
+        radius: f32,
+        angles: glam::Vec3,
+    },
+    Absolute(glam::Vec3),
+}
+
+struct Camera {
+    pos: CameraPosition,
+    look_at: glam::Vec3,
+}
+
+impl Camera {
+    pub fn get_view(&self) -> glam::Mat4 {
+        match self.pos {
+            CameraPosition::Absolute(camera_pos) => {
+                glam::Mat4::look_at_rh(camera_pos, self.look_at, glam::Vec3::new(0.0, 1.0, 0.0))
+            }
+            CameraPosition::SphericalAbout {
+                origin: _origin,
+                radius: _radius,
+                angles: _angles,
+            } => glam::Mat4::ZERO,
+        }
+    }
+}
+
 fn main() {
     let mut glfw = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
     glfw.window_hint(glfw::WindowHint::ContextVersion(4, 5));
@@ -161,12 +190,7 @@ fn main() {
         }
 
         unsafe {
-            let view_matrix = glam::Mat4::look_at_rh(
-                // CAMERA_POS,
-                CAMERA_POS,
-                LOOK_AT,
-                glam::Vec3::new(0.0, 1.0, 0.0),
-            );
+            let view_matrix = CAMERA.get_view();
 
             let proj_matrix = glam::Mat4::perspective_rh_gl(90.0f32.to_radians(), 1.0, 0.1, 1000.0);
 
@@ -206,8 +230,10 @@ fn main() {
 
 static mut MOUSE_X_POS: f64 = 0.0;
 static mut MOUSE_Y_POS: f64 = 0.0;
-static mut CAMERA_POS: glam::Vec3 = glam::Vec3::Z;
-static mut LOOK_AT: glam::Vec3 = glam::Vec3::ZERO;
+static mut CAMERA: Camera = Camera {
+    pos: CameraPosition::Absolute(glam::Vec3::Z),
+    look_at: glam::Vec3::ZERO,
+};
 static mut IS_PANNING: bool = false;
 
 fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
@@ -232,21 +258,20 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
                 IS_PANNING = false;
             }
         }
-        glfw::WindowEvent::CursorPos(x, y) => {
-            println!("Mouse at {}, {}", x, y);
-            unsafe {
-                if IS_PANNING {
-                    CAMERA_POS +=
+        glfw::WindowEvent::CursorPos(x, y) => unsafe {
+            if IS_PANNING {
+                if let CameraPosition::Absolute(ref mut pos) = CAMERA.pos {
+                    *pos +=
                         glam::Vec3::new(-(x - MOUSE_X_POS) as f32, (y - MOUSE_Y_POS) as f32, 0.0)
                             * 0.002;
-                    LOOK_AT +=
+                    CAMERA.look_at +=
                         glam::Vec3::new(-(x - MOUSE_X_POS) as f32, (y - MOUSE_Y_POS) as f32, 0.0)
                             * 0.002;
                 }
-                MOUSE_X_POS = x;
-                MOUSE_Y_POS = y;
             }
-        }
+            MOUSE_X_POS = x;
+            MOUSE_Y_POS = y;
+        },
         _ => {}
     }
 }
