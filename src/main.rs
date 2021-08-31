@@ -5,27 +5,43 @@ enum CameraPosition {
     SphericalAbout {
         origin: glam::Vec3,
         radius: f32,
-        angles: glam::Vec3,
+        theta: f32,
+        phi: f32,
     },
-    Absolute(glam::Vec3),
+    Absolute {
+        position: glam::Vec3,
+        look_at: glam::Vec3,
+    },
 }
 
 struct Camera {
     pos: CameraPosition,
-    look_at: glam::Vec3,
+}
+
+fn pos_from_theta_phi(theta: f32, phi: f32) -> glam::Vec3 {
+    glam::Vec3::new(theta.cos() * phi.cos(), phi.sin(), theta.sin() * phi.cos())
 }
 
 impl Camera {
     pub fn get_view(&self) -> glam::Mat4 {
         match self.pos {
-            CameraPosition::Absolute(camera_pos) => {
-                glam::Mat4::look_at_rh(camera_pos, self.look_at, glam::Vec3::new(0.0, 1.0, 0.0))
+            CameraPosition::Absolute { position, look_at } => {
+                glam::Mat4::look_at_rh(position, look_at, glam::Vec3::new(0.0, 1.0, 0.0))
             }
             CameraPosition::SphericalAbout {
-                origin: _origin,
-                radius: _radius,
-                angles: _angles,
-            } => glam::Mat4::ZERO,
+                origin,
+                radius,
+                theta,
+                phi,
+            } => {
+                let pos = radius * pos_from_theta_phi(theta, phi);
+                let pos = origin + pos;
+                glam::Mat4::look_at_rh(
+                    pos,
+                    -(pos - origin).normalize(),
+                    glam::Vec3::new(0.0, 1.0, 0.0),
+                )
+            }
         }
     }
 }
@@ -46,6 +62,7 @@ fn main() {
     window.set_mouse_button_polling(true);
     window.set_key_polling(true);
     window.set_size_polling(true);
+    window.set_scroll_polling(true);
 
     gl::load_with(|s| window.get_proc_address(s));
 
@@ -192,7 +209,13 @@ fn main() {
         unsafe {
             let view_matrix = CAMERA.get_view();
 
-            let proj_matrix = glam::Mat4::perspective_rh_gl(90.0f32.to_radians(), 1.0, 0.1, 1000.0);
+            let aspect_ratio = width as f32 / height as f32;
+            let proj_matrix = glam::Mat4::perspective_rh_gl(
+                90.0f32.to_radians() / aspect_ratio,
+                aspect_ratio,
+                0.1,
+                1000.0,
+            );
 
             let view_name = std::ffi::CString::new("u_view").unwrap();
             let loc = gl::GetUniformLocation(program, view_name.as_ptr() as *const i8);
@@ -230,11 +253,23 @@ fn main() {
 
 static mut MOUSE_X_POS: f64 = 0.0;
 static mut MOUSE_Y_POS: f64 = 0.0;
+static mut _CAMERA: Camera = Camera {
+    pos: CameraPosition::Absolute {
+        position: glam::Vec3::Z,
+        look_at: glam::Vec3::ZERO,
+    },
+};
 static mut CAMERA: Camera = Camera {
-    pos: CameraPosition::Absolute(glam::Vec3::Z),
-    look_at: glam::Vec3::ZERO,
+    pos: CameraPosition::SphericalAbout {
+        origin: glam::Vec3::ZERO,
+        radius: 3.0,
+        theta: 3.14 / 2.0,
+        phi: 0.0,
+    },
 };
 static mut IS_PANNING: bool = false;
+static mut ORIGINAL_X: f64 = 0.0;
+static mut ORIGINAL_Y: f64 = 0.0;
 
 fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
     match event {
@@ -246,28 +281,63 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
                 gl::Viewport(0, 0, new_x, new_y);
             }
         }
-        glfw::WindowEvent::MouseButton(glfw::MouseButton::Button3, glfw::Action::Press, _) => {
-            println!("Middle button depressed.");
-            unsafe {
-                IS_PANNING = true;
+        glfw::WindowEvent::MouseButton(glfw::MouseButton::Button3, glfw::Action::Press, _) => unsafe {
+            IS_PANNING = true;
+        },
+        glfw::WindowEvent::MouseButton(glfw::MouseButton::Button3, glfw::Action::Release, _) => unsafe {
+            IS_PANNING = false;
+        },
+        glfw::WindowEvent::Scroll(_, amount) => unsafe {
+            println!("Scroll");
+            match CAMERA.pos {
+                CameraPosition::SphericalAbout {
+                    origin: _,
+                    ref mut radius,
+                    theta: _,
+                    phi: _,
+                } => {
+                    println!("Scrolling by amount {}", amount);
+                    *radius -= (amount as f32) * 0.1;
+                }
+                _ => {}
             }
-        }
-        glfw::WindowEvent::MouseButton(glfw::MouseButton::Button3, glfw::Action::Release, _) => {
-            println!("Middle button depressed.");
-            unsafe {
-                IS_PANNING = false;
-            }
-        }
+        },
         glfw::WindowEvent::CursorPos(x, y) => unsafe {
             if IS_PANNING {
-                if let CameraPosition::Absolute(ref mut pos) = CAMERA.pos {
-                    *pos +=
-                        glam::Vec3::new(-(x - MOUSE_X_POS) as f32, (y - MOUSE_Y_POS) as f32, 0.0)
-                            * 0.002;
-                    CAMERA.look_at +=
-                        glam::Vec3::new(-(x - MOUSE_X_POS) as f32, (y - MOUSE_Y_POS) as f32, 0.0)
-                            * 0.002;
+                match CAMERA.pos {
+                    CameraPosition::Absolute {
+                        ref mut position,
+                        ref mut look_at,
+                    } => {
+                        *position += glam::Vec3::new(
+                            -(x - MOUSE_X_POS) as f32,
+                            (y - MOUSE_Y_POS) as f32,
+                            0.0,
+                        ) * 0.002;
+                        *look_at += glam::Vec3::new(
+                            -(x - MOUSE_X_POS) as f32,
+                            (y - MOUSE_Y_POS) as f32,
+                            0.0,
+                        ) * 0.002;
+                    }
+                    CameraPosition::SphericalAbout {
+                        origin: ref mut _origin,
+                        radius: ref mut _radius,
+                        ref mut phi,
+                        ref mut theta,
+                    } => {
+                        // println!("theta={}, phi={}", theta.to_degrees(), phi.to_degrees());
+                        if (x - ORIGINAL_X).abs() > (y - ORIGINAL_Y).abs() {
+                            *theta += -(x - MOUSE_X_POS) as f32 * 0.002;
+                        } else {
+                            *phi += (y - MOUSE_Y_POS) as f32 * 0.008;
+                            *phi = phi.clamp(-3.14 / 2.0, 3.14 / 2.0);
+                        }
+                    }
                 }
+            } else {
+                ORIGINAL_X = x;
+                ORIGINAL_Y = y;
             }
             MOUSE_X_POS = x;
             MOUSE_Y_POS = y;
