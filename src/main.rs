@@ -135,7 +135,15 @@ fn main() {
         gl::DeleteShader(fshader);
     }
 
-    let triangle = vec![0.0f32, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    let cube = vec![
+        -0.5f32, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5,
+        -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5,
+        0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5,
+        -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5,
+        -0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5,
+        0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5,
+        0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5,
+    ];
     let indices = vec![0u32, 1, 2];
 
     let mut vbo: gl::types::GLuint = 0;
@@ -150,8 +158,8 @@ fn main() {
         gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
         gl::BufferData(
             gl::ARRAY_BUFFER,
-            (triangle.len() * std::mem::size_of::<f32>()) as isize,
-            std::mem::transmute(triangle.as_ptr()),
+            (cube.len() * std::mem::size_of::<f32>()) as isize,
+            std::mem::transmute(cube.as_ptr()),
             gl::STATIC_DRAW,
         );
 
@@ -169,7 +177,7 @@ fn main() {
         gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
         gl::BufferData(
             gl::ELEMENT_ARRAY_BUFFER,
-            (triangle.len() * std::mem::size_of::<u32>())
+            (indices.len() * std::mem::size_of::<u32>())
                 .try_into()
                 .unwrap(),
             std::mem::transmute(indices.as_ptr()),
@@ -179,6 +187,7 @@ fn main() {
 
     unsafe {
         gl::Disable(gl::CULL_FACE);
+        gl::Enable(gl::DEPTH_TEST);
     }
 
     let (width, height) = window.get_framebuffer_size();
@@ -209,6 +218,7 @@ fn main() {
         unsafe {
             let view_matrix = CAMERA.get_view();
 
+            let (width, height) = window.get_framebuffer_size();
             let aspect_ratio = width as f32 / height as f32;
             let proj_matrix = glam::Mat4::perspective_rh_gl(
                 90.0f32.to_radians() / aspect_ratio,
@@ -242,8 +252,8 @@ fn main() {
             gl::BindVertexArray(vao);
             gl::UseProgram(program);
             gl::ClearColor(0.5, 0.3, 0.7, 1.0);
-            gl::Clear(gl::COLOR_BUFFER_BIT);
-            gl::DrawArrays(gl::TRIANGLES, 0, 3);
+            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+            gl::DrawArrays(gl::TRIANGLES, 0, 6 * 6);
             // gl::DrawElements(gl::TRIANGLES, 3, gl::UNSIGNED_INT, std::ptr::null());
         }
 
@@ -288,7 +298,6 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
             IS_PANNING = false;
         },
         glfw::WindowEvent::Scroll(_, amount) => unsafe {
-            println!("Scroll");
             match CAMERA.pos {
                 CameraPosition::SphericalAbout {
                     origin: _,
@@ -296,7 +305,6 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
                     theta: _,
                     phi: _,
                 } => {
-                    println!("Scrolling by amount {}", amount);
                     *radius -= (amount as f32) * 0.1;
                 }
                 _ => {}
@@ -328,7 +336,7 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
                     } => {
                         // println!("theta={}, phi={}", theta.to_degrees(), phi.to_degrees());
                         if (x - ORIGINAL_X).abs() > (y - ORIGINAL_Y).abs() {
-                            *theta += -(x - MOUSE_X_POS) as f32 * 0.002;
+                            *theta += (x - MOUSE_X_POS) as f32 * 0.002;
                         } else {
                             *phi += (y - MOUSE_Y_POS) as f32 * 0.008;
                             *phi = phi.clamp(-3.14 / 2.0, 3.14 / 2.0);
@@ -353,8 +361,13 @@ layout (location = 0) in vec3 a_pos;
 uniform mat4 u_view;
 uniform mat4 u_proj;
 
+out vec4 position;
+out vec3 light_pos;
+
 void main() {
+  light_pos = vec3(u_proj * u_view * vec4(0.0, 0.0, 1.0, 1.0));
   gl_Position = u_proj * u_view * vec4(a_pos.x, a_pos.y, a_pos.z, 1.0);
+  position = gl_Position;
 }
 ";
 
@@ -363,8 +376,30 @@ const FRAG_SOURCE: &'static str = "
 
 out vec4 FragColor;
 
+vec4 light_color = vec4(1.0, 1.0, 1.0, 1.0);
+vec4 object_color = vec4(1.0, 0.0, 0.0, 1.0);
+
+float ambient_coefficient = 0.3;
+float diffuse_coefficient = 0.3;
+float specular_coefficient = 0.3;
+
+in vec4 position;
+in vec3 light_pos;
+
 void main() {
-  FragColor = vec4(0.8, 0.0, 0.1, 1.0);
+
+    float p = 3;
+    vec3 normal = vec3(0.0, 0.0, 1.0);
+    vec3 to_light = normalize(light_pos - position.xyz);
+    vec3 halfway = normalize(normal + to_light);
+    float dist2 = dot(to_light, to_light);
+
+    vec4 ambient_component = ambient_coefficient * object_color;
+
+    vec4 diffuse_component = diffuse_coefficient * (light_color / dist2) * max(0, dot(normal, to_light));
+    vec4 specular_component = specular_coefficient * (light_color / dist2) * pow(max(0, dot(normal, halfway)), p);
+
+    FragColor = ambient_component + diffuse_component + specular_component;
 }
 ";
 
