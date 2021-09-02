@@ -53,7 +53,12 @@ fn main() {
         glfw::OpenGlProfileHint::Core,
     ));
     let (mut window, events) = glfw
-        .create_window(300, 300, "Hello this is window", glfw::WindowMode::Windowed)
+        .create_window(
+            1600,
+            1080,
+            "Hello this is window",
+            glfw::WindowMode::Windowed,
+        )
         .expect("Failed to create GLFW window.");
 
     window.make_current();
@@ -135,16 +140,41 @@ fn main() {
         gl::DeleteShader(fshader);
     }
 
-    let cube = vec![
-        -0.5f32, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5,
-        -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5,
-        0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5,
-        -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5,
-        -0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5,
-        0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5,
-        0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5,
+    let vertices = vec![
+        -0.5f32, -0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, // bottom left
+        0.5, -0.5, 0.5, 0.0, 0.0, 1.0, 1.0, 0.0, // bottom right
+        0.5, 0.5, 0.5, 0.0, 0.0, 1.0, 1.0, 1.0, // top right
+        -0.5, 0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 1.0, // top let
+        // right ace
+        0.5, -0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0, // bottom let
+        0.5, -0.5, -0.5, 1.0, 0.0, 0.0, 1.0, 0.0, // bottom right
+        0.5, 0.5, -0.5, 1.0, 0.0, 0.0, 1.0, 1.0, // top right
+        0.5, 0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 1.0, // top let
+        // let ace
+        -0.5, -0.5, -0.5, -1.0, 0.0, 0.0, 0.0, 0.0, // bottom let
+        -0.5, -0.5, 0.5, -1.0, 0.0, 0.0, 1.0, 0.0, // bottom right
+        -0.5, 0.5, 0.5, -1.0, 0.0, 0.0, 1.0, 1.0, // top right
+        -0.5, 0.5, -0.5, -1.0, 0.0, 0.0, 0.0, 1.0, // top let
+        // bottom ace
+        -0.5, -0.5, -0.5, 0.0, -1.0, 0.0, 0.0, 0.0, // bottom let
+        0.5, -0.5, -0.5, 0.0, -1.0, 0.0, 1.0, 0.0, // bottom right
+        0.5, -0.5, 0.5, 0.0, -1.0, 0.0, 1.0, 1.0, // top right
+        -0.5, -0.5, 0.5, 0.0, -1.0, 0.0, 0.0, 1.0, // top let
+        // top ace
+        -0.5, 0.5, 0.5, 0.0, 1.0, 0.0, 0.0, 0.0, // bottom let
+        0.5, 0.5, 0.5, 0.0, 1.0, 0.0, 1.0, 0.0, // bottom right
+        0.5, 0.5, -0.5, 0.0, 1.0, 0.0, 1.0, 1.0, // top right
+        -0.5, 0.5, -0.5, 0.0, 1.0, 0.0, 0.0, 1.0, // top let
+        // back ace
+        -0.5, 0.5, -0.5, 0.0, 0.0, -1.0, 0.0, 0.0, // bottom let
+        0.5, 0.5, -0.5, 0.0, 0.0, -1.0, 1.0, 0.0, // bottom right
+        0.5, -0.5, -0.5, 0.0, 0.0, -1.0, 1.0, 1.0, // top right
+        -0.5, -0.5, -0.5, 0.0, 0.0, -1.0, 0.0, 1.0, // top left
     ];
-    let indices = vec![0u32, 1, 2];
+    let indices = vec![
+        0u32, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4, 8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12, 16, 17,
+        18, 18, 19, 16, 20, 21, 22, 22, 23, 20,
+    ];
 
     let mut vbo: gl::types::GLuint = 0;
     let mut ebo: gl::types::GLuint = 0;
@@ -158,8 +188,8 @@ fn main() {
         gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
         gl::BufferData(
             gl::ARRAY_BUFFER,
-            (cube.len() * std::mem::size_of::<f32>()) as isize,
-            std::mem::transmute(cube.as_ptr()),
+            (vertices.len() * std::mem::size_of::<f32>()) as isize,
+            std::mem::transmute(vertices.as_ptr()),
             gl::STATIC_DRAW,
         );
 
@@ -168,10 +198,20 @@ fn main() {
             3,
             gl::FLOAT,
             gl::FALSE,
-            (3 * std::mem::size_of::<f32>()) as i32,
+            (8 * std::mem::size_of::<f32>()) as i32,
             std::ptr::null(),
         );
         gl::EnableVertexAttribArray(0);
+
+        gl::VertexAttribPointer(
+            1,
+            3,
+            gl::FLOAT,
+            gl::FALSE,
+            (8 * std::mem::size_of::<f32>()) as i32,
+            (3 * std::mem::size_of::<f32>()) as *const std::ffi::c_void,
+        );
+        gl::EnableVertexAttribArray(1);
 
         gl::GenBuffers(1, &mut ebo);
         gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
@@ -206,7 +246,7 @@ fn main() {
     }
 
     unsafe {
-        gl::ClearColor(0.5, 0.3, 0.7, 1.0);
+        gl::ClearColor(0.1, 0.1, 0.1, 1.0);
     }
 
     while !window.should_close() {
@@ -251,10 +291,10 @@ fn main() {
             gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
             gl::BindVertexArray(vao);
             gl::UseProgram(program);
-            gl::ClearColor(0.5, 0.3, 0.7, 1.0);
+            //gl::ClearColor(0.1, 0.1, 0.1, 1.0);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-            gl::DrawArrays(gl::TRIANGLES, 0, 6 * 6);
-            // gl::DrawElements(gl::TRIANGLES, 3, gl::UNSIGNED_INT, std::ptr::null());
+            // gl::DrawArrays(gl::TRIANGLES, 0, 6 * 6);
+            gl::DrawElements(gl::TRIANGLES, 36, gl::UNSIGNED_INT, std::ptr::null());
         }
 
         window.swap_buffers();
@@ -357,17 +397,21 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
 const VERTEX_SOURCE: &'static str = "
 #version 330 core
 layout (location = 0) in vec3 a_pos;
+layout (location = 1) in vec3 a_normal;
 
 uniform mat4 u_view;
 uniform mat4 u_proj;
 
-out vec4 position;
-out vec3 light_pos;
+out vec3 io_position;
+out vec3 io_light_pos;
+out vec3 io_normal;
 
 void main() {
-  light_pos = vec3(u_proj * u_view * vec4(0.0, 0.0, 1.0, 1.0));
-  gl_Position = u_proj * u_view * vec4(a_pos.x, a_pos.y, a_pos.z, 1.0);
-  position = gl_Position;
+  io_light_pos = vec3(u_view * vec4(0.0, 1.0, 1.0, 1.0));
+  io_position = vec3(u_view * vec4(a_pos, 1.0));
+  io_normal = vec3(u_view * vec4(a_normal, 0.0));
+
+  gl_Position = u_proj * u_view * vec4(a_pos, 1.0);
 }
 ";
 
@@ -376,28 +420,30 @@ const FRAG_SOURCE: &'static str = "
 
 out vec4 FragColor;
 
-vec4 light_color = vec4(1.0, 1.0, 1.0, 1.0);
-vec4 object_color = vec4(1.0, 0.0, 0.0, 1.0);
+vec4 k_light_color = vec4(1.0, 1.0, 1.0, 1.0);
+vec4 k_object_color = vec4(0.8, 0.2, 0.2, 1.0);
 
-float ambient_coefficient = 0.3;
-float diffuse_coefficient = 0.3;
-float specular_coefficient = 0.3;
+float k_ambient_coefficient = 0.3;
+float k_diffuse_coefficient = 0.3;
+float k_specular_coefficient = 0.3;
+float k_p = 16;
 
-in vec4 position;
-in vec3 light_pos;
+in vec3 io_position;
+in vec3 io_light_pos;
+in vec3 io_normal;
 
 void main() {
 
-    float p = 3;
-    vec3 normal = vec3(0.0, 0.0, 1.0);
-    vec3 to_light = normalize(light_pos - position.xyz);
-    vec3 halfway = normalize(normal + to_light);
+    vec3 to_light = normalize(io_light_pos - io_position);
+    vec3 to_camera = normalize(-io_position);
+    vec3 halfway = normalize(to_camera + to_light);
     float dist2 = dot(to_light, to_light);
 
-    vec4 ambient_component = ambient_coefficient * object_color;
+    vec4 ambient_component = k_ambient_coefficient * k_object_color;
 
-    vec4 diffuse_component = diffuse_coefficient * (light_color / dist2) * max(0, dot(normal, to_light));
-    vec4 specular_component = specular_coefficient * (light_color / dist2) * pow(max(0, dot(normal, halfway)), p);
+    vec4 diffuse_component = k_diffuse_coefficient * (k_light_color / dist2) * max(0, dot(io_normal, to_light));
+
+    vec4 specular_component = k_specular_coefficient * (k_light_color / dist2) * pow(max(0, dot(io_normal, halfway)), k_p);
 
     FragColor = ambient_component + diffuse_component + specular_component;
 }
