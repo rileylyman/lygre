@@ -1,6 +1,5 @@
 use glfw::{Action, Context, Key};
-
-mod gltf;
+use std::convert::TryInto;
 
 enum CameraPosition {
     SphericalAbout {
@@ -141,18 +140,7 @@ fn main() {
         gl::DeleteShader(fshader);
     }
 
-    // let (document, raw_buffers, _images) = gltf::import("res/Box.gltf").unwrap();
-    //
-    // let file = std::fs::File::open("res/Box.gltf").unwrap();
-    // let reader = std::io::BufReader::new(file);
-    // let document = gltf::Gltf::from_reader(reader).unwrap();
-    // let document = gltf::Gltf::open("res/Box.gltf").unwrap();
-    let document: gltf::Gltf =
-        serde_json::from_str(&String::from_utf8(std::fs::read("res/Box.gltf").unwrap()).unwrap())
-            .unwrap();
-    println!("{:?}", document.nodes);
-
-    let raw_buffers = vec![std::fs::read("res/Box0.bin").unwrap()];
+    let (document, raw_buffers, _images) = gltf::import("res/Box.gltf").unwrap();
 
     let mut buffers = Vec::new();
     for rb in raw_buffers {
@@ -161,11 +149,14 @@ fn main() {
 
             gl::GenBuffers(1, &mut vbo);
 
+            let num_bytes = rb.0.len() as isize;
+            println!("Buffering num_bytes={}", num_bytes);
+
             gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
             gl::BufferData(
                 gl::ARRAY_BUFFER,
-                (rb.len() * std::mem::size_of::<f32>()) as isize,
-                std::mem::transmute(rb.as_ptr()),
+                num_bytes,
+                std::mem::transmute(rb.0[..].as_ptr()),
                 gl::STATIC_DRAW,
             );
 
@@ -174,126 +165,82 @@ fn main() {
     }
 
     let mut primitives = Vec::new();
-    for scene in document.scenes.iter() {
-        println!("Number of nodes: {}", scene.nodes.len());
-        let mut i = 0;
-        for node in scene.nodes.iter() {
-            let node = &document.nodes[i];
-            println!(
-                "Node #{} has {} children",
-                i,
-                node.children.as_ref().unwrap_or(&vec![]).len()
-            );
-            i += 1;
+    println!("Number of nodes: {}", document.nodes().len());
 
-            println!("{:?}", node.mesh);
-            if let Some(mesh_idx) = node.mesh {
-                let mesh = &document.meshes[mesh_idx];
-                for prim in mesh.primitives.iter() {
-                    unsafe {
-                        let mut vao = 0;
-                        gl::GenVertexArrays(1, &mut vao);
-                        gl::BindVertexArray(vao);
+    for node in document.nodes() {
+        println!(
+            "Node #{} has {} children",
+            node.index(),
+            node.children().count()
+        );
 
-                        let vertex_attrib = |(attrib_idx, sem)| {
-                            let accessor = &document.accessors[prim.attributes[sem]];
-                            gl::BindBuffer(
-                                gl::ARRAY_BUFFER,
-                                buffers[document.bufferViews[accessor.bufferView].buffer].0,
-                            );
-                            let byte_size = if accessor.r#type == "SCALAR" {
-                                4
-                            } else {
-                                4 * 3
-                            };
-                            gl::VertexAttribPointer(
-                                attrib_idx,
-                                byte_size / 4 as i32,
-                                gl::FLOAT,
-                                gl::FALSE,
-                                document.bufferViews[accessor.bufferView]
-                                    .byteStride
-                                    .unwrap_or(byte_size as usize)
-                                    as i32,
-                                // .unwrap_or(size * std::mem::size_of::<f32>().try_into().unwrap()),
-                                (accessor.byteOffset
-                                    + document.bufferViews[accessor.bufferView].byteOffset)
-                                    as *const std::ffi::c_void,
-                            );
-                            gl::EnableVertexAttribArray(attrib_idx);
-                        };
-                        vertex_attrib((0, "POSITION"));
-                        vertex_attrib((1, "NORMAL"));
+        if let Some(mesh) = node.mesh() {
+            for prim in mesh.primitives() {
+                unsafe {
+                    let mut vao = 0;
+                    gl::GenVertexArrays(1, &mut vao);
+                    gl::BindVertexArray(vao);
 
-                        let accessor = &document.accessors[prim.indices];
-                        let indices = &buffers[document.bufferViews[accessor.bufferView].buffer].1;
+                    let vertex_attrib = |(attrib_idx, sem)| {
+                        let accessor = prim.get(sem).unwrap();
+                        let vbo = buffers[accessor.view().unwrap().buffer().index()].0;
+                        gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+                        let size = accessor.size();
+                        let stride = accessor.view().unwrap().stride().unwrap();
+                        let offset = accessor.offset() + accessor.view().unwrap().offset();
 
-                        let mut ebo = 0;
-                        gl::GenBuffers(1, &mut ebo);
-                        gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
-                        gl::BufferData(
-                            gl::ELEMENT_ARRAY_BUFFER,
-                            accessor.count as isize * 4,
-                            std::mem::transmute(
-                                &indices[(accessor.byteOffset
-                                    + document.bufferViews[accessor.bufferView].byteOffset)
-                                    / 4],
-                            ),
-                            gl::STATIC_DRAW,
+                        println!(
+                            "Setting vertex_attrib {} for vbo={} as size={}, stride={}, offset={}",
+                            attrib_idx, vbo, size, stride, offset
                         );
+                        gl::VertexAttribPointer(
+                            attrib_idx,
+                            (size / 4) as i32,
+                            gl::FLOAT,
+                            gl::FALSE,
+                            stride as i32,
+                            // .unwrap_or(size * std::mem::size_of::<f32>().try_into().unwrap()),
+                            offset as *const std::ffi::c_void,
+                        );
+                        gl::EnableVertexAttribArray(attrib_idx);
+                    };
+                    vertex_attrib((0, &gltf::Semantic::Positions));
+                    vertex_attrib((1, &gltf::Semantic::Normals));
 
-                        primitives.push((vao, ebo, accessor.count as i32));
-                    }
+                    let accessor = prim.indices().unwrap();
+                    let indices = &buffers[accessor.view().unwrap().buffer().index()].1;
+                    let indices_offset = accessor.offset() + accessor.view().unwrap().offset();
+                    println!(
+                        "accessor.size()={}, accessor.count()={}, indices_offset={}",
+                        accessor.size(),
+                        accessor.count(),
+                        indices_offset,
+                    );
+
+                    println!(
+                        "Buffering {} indices in total",
+                        accessor.count() * accessor.size()
+                    );
+
+                    let mut ebo = 0;
+                    gl::GenBuffers(1, &mut ebo);
+                    gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
+                    gl::BufferData(
+                        gl::ELEMENT_ARRAY_BUFFER,
+                        accessor.count() as isize * accessor.size() as isize,
+                        std::mem::transmute(&indices[indices_offset]),
+                        gl::STATIC_DRAW,
+                    );
+
+                    let material = prim.material();
+                    let base_color: glam::Vec4 =
+                        material.pbr_metallic_roughness().base_color_factor().into();
+
+                    primitives.push((vao, ebo, 0, accessor.count() as i32, base_color));
                 }
             }
         }
     }
-
-    let vertices = vec![
-        -0.5f32, -0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, // bottom left
-        0.5, -0.5, 0.5, 0.0, 0.0, 1.0, 1.0, 0.0, // bottom right
-        0.5, 0.5, 0.5, 0.0, 0.0, 1.0, 1.0, 1.0, // top right
-        -0.5, 0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 1.0, // top let
-        // right ace
-        0.5, -0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0, // bottom let
-        0.5, -0.5, -0.5, 1.0, 0.0, 0.0, 1.0, 0.0, // bottom right
-        0.5, 0.5, -0.5, 1.0, 0.0, 0.0, 1.0, 1.0, // top right
-        0.5, 0.5, 0.5, 1.0, 0.0, 0.0, 0.0, 1.0, // top let
-        // let ace
-        -0.5, -0.5, -0.5, -1.0, 0.0, 0.0, 0.0, 0.0, // bottom let
-        -0.5, -0.5, 0.5, -1.0, 0.0, 0.0, 1.0, 0.0, // bottom right
-        -0.5, 0.5, 0.5, -1.0, 0.0, 0.0, 1.0, 1.0, // top right
-        -0.5, 0.5, -0.5, -1.0, 0.0, 0.0, 0.0, 1.0, // top let
-        // bottom ace
-        -0.5, -0.5, -0.5, 0.0, -1.0, 0.0, 0.0, 0.0, // bottom let
-        0.5, -0.5, -0.5, 0.0, -1.0, 0.0, 1.0, 0.0, // bottom right
-        0.5, -0.5, 0.5, 0.0, -1.0, 0.0, 1.0, 1.0, // top right
-        -0.5, -0.5, 0.5, 0.0, -1.0, 0.0, 0.0, 1.0, // top let
-        // top ace
-        -0.5, 0.5, 0.5, 0.0, 1.0, 0.0, 0.0, 0.0, // bottom let
-        0.5, 0.5, 0.5, 0.0, 1.0, 0.0, 1.0, 0.0, // bottom right
-        0.5, 0.5, -0.5, 0.0, 1.0, 0.0, 1.0, 1.0, // top right
-        -0.5, 0.5, -0.5, 0.0, 1.0, 0.0, 0.0, 1.0, // top let
-        // back ace
-        -0.5, 0.5, -0.5, 0.0, 0.0, -1.0, 0.0, 0.0, // bottom let
-        0.5, 0.5, -0.5, 0.0, 0.0, -1.0, 1.0, 0.0, // bottom right
-        0.5, -0.5, -0.5, 0.0, 0.0, -1.0, 1.0, 1.0, // top right
-        -0.5, -0.5, -0.5, 0.0, 0.0, -1.0, 0.0, 1.0, // top left
-        // bottom plane
-        -10.5, -1.5, -10.5, 0.0, 1.0, 0.0, 0.0, 0.0, // bottom let
-        10.5, -1.5, -10.5, 0.0, 1.0, 0.0, 1.0, 0.0, // bottom right
-        10.5, -1.5, 10.5, 0.0, 1.0, 0.0, 1.0, 1.0, // top right
-        -10.5, -1.5, 10.5, 0.0, 1.0, 0.0, 0.0, 1.0, // top let
-    ];
-    let indices = vec![
-        0u32, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4, 8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12, 16, 17,
-        18, 18, 19, 16, 20, 21, 22, 22, 23, 20, 24, 25, 26, 26, 27, 24,
-    ];
-
-    let mut vbo: gl::types::GLuint = 0;
-    let mut ebo: gl::types::GLuint = 0;
-    let mut vao: gl::types::GLuint = 0;
-    unsafe {}
 
     unsafe {
         gl::Disable(gl::CULL_FACE);
@@ -357,7 +304,11 @@ fn main() {
                 proj_matrix.to_cols_array().as_ptr(),
             );
 
-            for (vao, ebo, num_indices) in primitives.iter() {
+            for (vao, ebo, indices_offset, num_indices, base_color) in primitives.iter() {
+                let color_name = std::ffi::CString::new("u_object_color").unwrap();
+                let color_loc = gl::GetUniformLocation(program, color_name.as_ptr() as *const i8);
+                gl::ProgramUniform4fv(program, color_loc, 1, base_color.to_array().as_ptr());
+
                 gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, *ebo);
                 // gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
                 gl::BindVertexArray(*vao);
@@ -368,8 +319,8 @@ fn main() {
                 gl::DrawElements(
                     gl::TRIANGLES,
                     *num_indices,
-                    gl::UNSIGNED_INT,
-                    std::ptr::null(),
+                    gl::UNSIGNED_SHORT,
+                    *indices_offset as *const std::ffi::c_void,
                 );
             }
         }
@@ -499,7 +450,7 @@ out vec4 FragColor;
 
 vec4 k_light_color = vec4(1.0, 1.0, 1.0, 1.0);
 // vec4 k_object_color = vec4(0.8, 0.2, 0.2, 1.0);
-vec4 k_object_color = vec4(0.5, 0.5, 0.5, 1.0);
+uniform vec4 u_object_color;
 
 float k_ambient_coefficient = 0.3;
 float k_diffuse_coefficient = 0.3;
@@ -517,7 +468,7 @@ void main() {
     vec3 halfway = normalize(to_camera + to_light);
     float dist2 = dot(to_light, to_light);
 
-    vec4 ambient_component = k_ambient_coefficient * k_object_color;
+    vec4 ambient_component = k_ambient_coefficient * u_object_color;
 
     vec4 diffuse_component = k_diffuse_coefficient * (k_light_color / dist2) * max(0, dot(io_normal, to_light));
 
