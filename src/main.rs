@@ -1,5 +1,6 @@
 use glfw::{Action, Context, Key};
-use std::convert::TryInto;
+
+mod gltf;
 
 enum CameraPosition {
     SphericalAbout {
@@ -83,10 +84,10 @@ fn main() {
         );
         gl::CompileShader(vshader);
 
-        let mut vertex_compiled = 0;
+        let mut vertex_compiled = 0i32;
         gl::GetShaderiv(vshader, gl::COMPILE_STATUS, &mut vertex_compiled);
 
-        if vertex_compiled != gl::TRUE.into() {
+        if vertex_compiled as u8 != gl::TRUE {
             let mut log_length = 0;
             let mut message: [gl::types::GLchar; 1024] = [0; 1024];
             gl::GetShaderInfoLog(vshader, 1024, &mut log_length, message.as_mut_ptr());
@@ -106,10 +107,10 @@ fn main() {
         );
         gl::CompileShader(fshader);
 
-        let mut frag_compiled = 0;
+        let mut frag_compiled = 0i32;
         gl::GetShaderiv(fshader, gl::COMPILE_STATUS, &mut frag_compiled);
 
-        if frag_compiled != gl::TRUE.into() {
+        if frag_compiled as u8 != gl::TRUE {
             let mut log_length = 0;
             let mut message: [gl::types::GLchar; 1024] = [0; 1024];
             gl::GetShaderInfoLog(fshader, 1024, &mut log_length, message.as_mut_ptr());
@@ -124,9 +125,9 @@ fn main() {
         gl::AttachShader(program, fshader);
         gl::LinkProgram(program);
 
-        let mut program_linked = 0;
+        let mut program_linked = 0i32;
         gl::GetProgramiv(program, gl::LINK_STATUS, &mut program_linked);
-        if program_linked != gl::TRUE.into() {
+        if program_linked as u8 != gl::TRUE {
             let mut log_length = 0;
             let mut message: [gl::types::GLchar; 1024] = [0; 1024];
             gl::GetProgramInfoLog(fshader, 1024, &mut log_length, message.as_mut_ptr());
@@ -138,6 +139,114 @@ fn main() {
 
         gl::DeleteShader(vshader);
         gl::DeleteShader(fshader);
+    }
+
+    // let (document, raw_buffers, _images) = gltf::import("res/Box.gltf").unwrap();
+    //
+    // let file = std::fs::File::open("res/Box.gltf").unwrap();
+    // let reader = std::io::BufReader::new(file);
+    // let document = gltf::Gltf::from_reader(reader).unwrap();
+    // let document = gltf::Gltf::open("res/Box.gltf").unwrap();
+    let document: gltf::Gltf =
+        serde_json::from_str(&String::from_utf8(std::fs::read("res/Box.gltf").unwrap()).unwrap())
+            .unwrap();
+    println!("{:?}", document.nodes);
+
+    let raw_buffers = vec![std::fs::read("res/Box0.bin").unwrap()];
+
+    let mut buffers = Vec::new();
+    for rb in raw_buffers {
+        unsafe {
+            let mut vbo = 0;
+
+            gl::GenBuffers(1, &mut vbo);
+
+            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+            gl::BufferData(
+                gl::ARRAY_BUFFER,
+                (rb.len() * std::mem::size_of::<f32>()) as isize,
+                std::mem::transmute(rb.as_ptr()),
+                gl::STATIC_DRAW,
+            );
+
+            buffers.push((vbo, rb));
+        }
+    }
+
+    let mut primitives = Vec::new();
+    for scene in document.scenes.iter() {
+        println!("Number of nodes: {}", scene.nodes.len());
+        let mut i = 0;
+        for node in scene.nodes.iter() {
+            let node = &document.nodes[i];
+            println!(
+                "Node #{} has {} children",
+                i,
+                node.children.as_ref().unwrap_or(&vec![]).len()
+            );
+            i += 1;
+
+            println!("{:?}", node.mesh);
+            if let Some(mesh_idx) = node.mesh {
+                let mesh = &document.meshes[mesh_idx];
+                for prim in mesh.primitives.iter() {
+                    unsafe {
+                        let mut vao = 0;
+                        gl::GenVertexArrays(1, &mut vao);
+                        gl::BindVertexArray(vao);
+
+                        let vertex_attrib = |(attrib_idx, sem)| {
+                            let accessor = &document.accessors[prim.attributes[sem]];
+                            gl::BindBuffer(
+                                gl::ARRAY_BUFFER,
+                                buffers[document.bufferViews[accessor.bufferView].buffer].0,
+                            );
+                            let byte_size = if accessor.r#type == "SCALAR" {
+                                4
+                            } else {
+                                4 * 3
+                            };
+                            gl::VertexAttribPointer(
+                                attrib_idx,
+                                byte_size / 4 as i32,
+                                gl::FLOAT,
+                                gl::FALSE,
+                                document.bufferViews[accessor.bufferView]
+                                    .byteStride
+                                    .unwrap_or(byte_size as usize)
+                                    as i32,
+                                // .unwrap_or(size * std::mem::size_of::<f32>().try_into().unwrap()),
+                                (accessor.byteOffset
+                                    + document.bufferViews[accessor.bufferView].byteOffset)
+                                    as *const std::ffi::c_void,
+                            );
+                            gl::EnableVertexAttribArray(attrib_idx);
+                        };
+                        vertex_attrib((0, "POSITION"));
+                        vertex_attrib((1, "NORMAL"));
+
+                        let accessor = &document.accessors[prim.indices];
+                        let indices = &buffers[document.bufferViews[accessor.bufferView].buffer].1;
+
+                        let mut ebo = 0;
+                        gl::GenBuffers(1, &mut ebo);
+                        gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
+                        gl::BufferData(
+                            gl::ELEMENT_ARRAY_BUFFER,
+                            accessor.count as isize * 4,
+                            std::mem::transmute(
+                                &indices[(accessor.byteOffset
+                                    + document.bufferViews[accessor.bufferView].byteOffset)
+                                    / 4],
+                            ),
+                            gl::STATIC_DRAW,
+                        );
+
+                        primitives.push((vao, ebo, accessor.count as i32));
+                    }
+                }
+            }
+        }
     }
 
     let vertices = vec![
@@ -184,51 +293,7 @@ fn main() {
     let mut vbo: gl::types::GLuint = 0;
     let mut ebo: gl::types::GLuint = 0;
     let mut vao: gl::types::GLuint = 0;
-    unsafe {
-        gl::GenVertexArrays(1, &mut vao);
-        gl::GenBuffers(1, &mut vbo);
-
-        gl::BindVertexArray(vao);
-
-        gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-        gl::BufferData(
-            gl::ARRAY_BUFFER,
-            (vertices.len() * std::mem::size_of::<f32>()) as isize,
-            std::mem::transmute(vertices.as_ptr()),
-            gl::STATIC_DRAW,
-        );
-
-        gl::VertexAttribPointer(
-            0,
-            3,
-            gl::FLOAT,
-            gl::FALSE,
-            (8 * std::mem::size_of::<f32>()) as i32,
-            std::ptr::null(),
-        );
-        gl::EnableVertexAttribArray(0);
-
-        gl::VertexAttribPointer(
-            1,
-            3,
-            gl::FLOAT,
-            gl::FALSE,
-            (8 * std::mem::size_of::<f32>()) as i32,
-            (3 * std::mem::size_of::<f32>()) as *const std::ffi::c_void,
-        );
-        gl::EnableVertexAttribArray(1);
-
-        gl::GenBuffers(1, &mut ebo);
-        gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
-        gl::BufferData(
-            gl::ELEMENT_ARRAY_BUFFER,
-            (indices.len() * std::mem::size_of::<u32>())
-                .try_into()
-                .unwrap(),
-            std::mem::transmute(indices.as_ptr()),
-            gl::STATIC_DRAW,
-        );
-    }
+    unsafe {}
 
     unsafe {
         gl::Disable(gl::CULL_FACE);
@@ -292,14 +357,21 @@ fn main() {
                 proj_matrix.to_cols_array().as_ptr(),
             );
 
-            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, ebo);
-            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-            gl::BindVertexArray(vao);
-            gl::UseProgram(program);
-            //gl::ClearColor(0.1, 0.1, 0.1, 1.0);
-            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-            // gl::DrawArrays(gl::TRIANGLES, 0, 6 * 6);
-            gl::DrawElements(gl::TRIANGLES, 36 + 6, gl::UNSIGNED_INT, std::ptr::null());
+            for (vao, ebo, num_indices) in primitives.iter() {
+                gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, *ebo);
+                // gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
+                gl::BindVertexArray(*vao);
+                gl::UseProgram(program);
+                //gl::ClearColor(0.1, 0.1, 0.1, 1.0);
+                gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+                // gl::DrawArrays(gl::TRIANGLES, 0, 6 * 6);
+                gl::DrawElements(
+                    gl::TRIANGLES,
+                    *num_indices,
+                    gl::UNSIGNED_INT,
+                    std::ptr::null(),
+                );
+            }
         }
 
         window.swap_buffers();
