@@ -170,10 +170,18 @@ fn main() {
         0.5, 0.5, -0.5, 0.0, 0.0, -1.0, 1.0, 0.0, // bottom right
         0.5, -0.5, -0.5, 0.0, 0.0, -1.0, 1.0, 1.0, // top right
         -0.5, -0.5, -0.5, 0.0, 0.0, -1.0, 0.0, 1.0, // top left
+
+
+        // bottom plane
+        -10.5, -1.5, -10.5, 0.0, 1.0, 0.0, 0.0, 0.0, // bottom let
+        10.5, -1.5, -10.5, 0.0, 1.0, 0.0, 1.0, 0.0, // bottom right
+        10.5, -1.5, 10.5, 0.0, 1.0, 0.0, 1.0, 1.0, // top right
+        -10.5, -1.5, 10.5, 0.0, 1.0, 0.0, 0.0, 1.0, // top let
+
     ];
     let indices = vec![
         0u32, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4, 8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12, 16, 17,
-        18, 18, 19, 16, 20, 21, 22, 22, 23, 20,
+        18, 18, 19, 16, 20, 21, 22, 22, 23, 20, 24, 25, 26, 26, 27, 24
     ];
 
     let mut vbo: gl::types::GLuint = 0;
@@ -294,7 +302,7 @@ fn main() {
             //gl::ClearColor(0.1, 0.1, 0.1, 1.0);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
             // gl::DrawArrays(gl::TRIANGLES, 0, 6 * 6);
-            gl::DrawElements(gl::TRIANGLES, 36, gl::UNSIGNED_INT, std::ptr::null());
+            gl::DrawElements(gl::TRIANGLES, 36 + 6, gl::UNSIGNED_INT, std::ptr::null());
         }
 
         window.swap_buffers();
@@ -407,7 +415,7 @@ out vec3 io_light_pos;
 out vec3 io_normal;
 
 void main() {
-  io_light_pos = vec3(u_view * vec4(0.0, 1.0, 1.0, 1.0));
+  io_light_pos = vec3(u_view * vec4(0.0, 2.0, 0.0, 1.0));
   io_position = vec3(u_view * vec4(a_pos, 1.0));
   io_normal = vec3(u_view * vec4(a_normal, 0.0));
 
@@ -421,7 +429,8 @@ const FRAG_SOURCE: &'static str = "
 out vec4 FragColor;
 
 vec4 k_light_color = vec4(1.0, 1.0, 1.0, 1.0);
-vec4 k_object_color = vec4(0.8, 0.2, 0.2, 1.0);
+// vec4 k_object_color = vec4(0.8, 0.2, 0.2, 1.0);
+vec4 k_object_color = vec4(0.5, 0.5, 0.5, 1.0);
 
 float k_ambient_coefficient = 0.3;
 float k_diffuse_coefficient = 0.3;
