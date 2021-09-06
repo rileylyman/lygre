@@ -168,7 +168,52 @@ fn main() {
     let mut primitives = Vec::new();
     println!("Number of nodes: {}", document.nodes().len());
 
-    for node in document.nodes() {
+    let default_scene = document
+        .default_scene()
+        .unwrap_or(document.scenes().next().unwrap());
+
+    let get_node_matrix = |node: &gltf::Node| match node.transform() {
+        gltf::scene::Transform::Matrix { matrix } => glam::Mat4::from_cols_array_2d(&matrix),
+        gltf::scene::Transform::Decomposed {
+            translation,
+            rotation,
+            scale,
+        } => glam::Mat4::from_scale_rotation_translation(
+            glam::Vec3::from_slice(&scale[..]),
+            glam::Quat::from_array(rotation),
+            glam::Vec3::from_slice(&translation[..]),
+        ),
+    };
+
+    let mut levels = vec![default_scene
+        .nodes()
+        .map(|node| {
+            let node_matrix = get_node_matrix(&node);
+            println!("Initial levels has node {}", node.index());
+            (node, node_matrix)
+        })
+        .collect::<Vec<_>>()];
+
+    loop {
+        let curr = &levels[levels.len() - 1];
+        let mut to_append = Vec::new();
+        for (node, node_matrix) in curr {
+            for child in node.children() {
+                println!("pushing child with index {}", child.index());
+                let child_matrix = get_node_matrix(&child);
+                to_append.push((child, child_matrix * *node_matrix));
+            }
+        }
+        if to_append.len() == 0 {
+            break;
+        }
+
+        levels.push(to_append);
+    }
+
+    let all_nodes = levels.into_iter().flatten().collect::<Vec<_>>();
+
+    for (node, node_matrix) in all_nodes {
         println!(
             "Node #{} has {} children",
             node.index(),
@@ -241,21 +286,6 @@ fn main() {
                     let material = prim.material();
                     let base_color: glam::Vec4 =
                         material.pbr_metallic_roughness().base_color_factor().into();
-
-                    let node_matrix = match node.transform() {
-                        gltf::scene::Transform::Matrix { matrix } => {
-                            glam::Mat4::from_cols_array_2d(&matrix)
-                        }
-                        gltf::scene::Transform::Decomposed {
-                            translation,
-                            rotation,
-                            scale,
-                        } => glam::Mat4::from_scale_rotation_translation(
-                            glam::Vec3::from_slice(&scale[..]),
-                            glam::Quat::from_array(rotation),
-                            glam::Vec3::from_slice(&translation[..]),
-                        ),
-                    };
 
                     primitives.push((
                         vao,
@@ -361,8 +391,6 @@ fn main() {
                     gl::UNSIGNED_SHORT,
                     *indices_offset as *const std::ffi::c_void,
                 );
-
-                break;
             }
         }
 
