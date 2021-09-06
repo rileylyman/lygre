@@ -1,4 +1,5 @@
 use glfw::{Action, Context, Key};
+use std::path::PathBuf;
 
 enum CameraPosition {
     SphericalAbout {
@@ -134,8 +135,21 @@ fn main() {
         gl::DeleteShader(fshader);
     }
 
-    let document = gltf::Gltf::open("res/spheres/glTF/MetalRoughSpheres.gltf").unwrap();
-    let raw_buffers = vec![std::fs::read("res/spheres/glTF/MetalRoughSpheres0.bin").unwrap()];
+    let mut filepath = PathBuf::new();
+    filepath.push("res/spheres/glTF/MetalRoughSpheres.gltf");
+    let document = gltf::Gltf::open(&filepath).unwrap();
+
+    let mut raw_buffers = Vec::new();
+    for buffer in document.buffers() {
+        let source = buffer.source();
+        if let gltf::buffer::Source::Uri(filename) = source {
+            println!("Attempting to retrieve binary file {}", filename);
+            raw_buffers.push(std::fs::read(filepath.with_file_name(filename)).unwrap());
+        } else {
+            unimplemented!();
+        }
+    }
+    // let raw_buffers = vec![std::fs::read("res/scifi_helmet/scene.bin").unwrap()];
 
     let mut buffers = Vec::new();
     for rb in raw_buffers {
