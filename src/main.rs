@@ -1,6 +1,31 @@
 use glfw::{Action, Context, Key};
 use std::path::PathBuf;
 
+static mut SCROLL_FACTOR: f32 = 0.1;
+static mut MOUSE_X_POS: f64 = 0.0;
+static mut MOUSE_Y_POS: f64 = 0.0;
+static mut _CAMERA: Camera = Camera {
+    pos: CameraPosition::Absolute {
+        position: glam::Vec3::Z,
+        look_at: glam::Vec3::ZERO,
+    },
+    zfar: 1000.0,
+    znear: 0.1,
+};
+static mut CAMERA: Camera = Camera {
+    pos: CameraPosition::SphericalAbout {
+        origin: glam::Vec3::ZERO,
+        radius: 3.0,
+        theta: 3.14 / 2.0,
+        phi: 0.0,
+    },
+    zfar: 1000.0,
+    znear: 0.1,
+};
+static mut IS_PANNING: bool = false;
+static mut ORIGINAL_X: f64 = 0.0;
+static mut ORIGINAL_Y: f64 = 0.0;
+
 enum CameraPosition {
     SphericalAbout {
         origin: glam::Vec3,
@@ -16,6 +41,8 @@ enum CameraPosition {
 
 struct Camera {
     pos: CameraPosition,
+    zfar: f32,
+    znear: f32,
 }
 
 fn pos_from_theta_phi(theta: f32, phi: f32) -> glam::Vec3 {
@@ -136,7 +163,8 @@ fn main() {
     }
 
     let mut filepath = PathBuf::new();
-    filepath.push("res/spheres/glTF/MetalRoughSpheres.gltf");
+    // filepath.push("res/2cylinder/2CylinderEngine.gltf");
+    filepath.push("res/damaged_helmet/DamagedHelmet.gltf");
     let document = gltf::Gltf::open(&filepath).unwrap();
 
     let mut raw_buffers = Vec::new();
@@ -197,26 +225,33 @@ fn main() {
         .nodes()
         .map(|node| {
             let node_matrix = get_node_matrix(&node);
-            println!(
-                "Initial levels has node {} with matrix {:?}",
-                node.index(),
-                node_matrix
-            );
             (node, node_matrix)
         })
         .collect::<Vec<_>>()];
+
+    print!("Root level: ");
+    for (node, _) in levels[0].iter() {
+        print!("Node#{} ", node.index());
+    }
+    println!();
 
     loop {
         let curr = &levels[levels.len() - 1];
         let mut to_append = Vec::new();
         for (node, node_matrix) in curr {
             for child in node.children() {
-                println!("pushing child with index {}", child.index());
                 let child_matrix = get_node_matrix(&child);
-                println!("Child has node matrix {:?}", child_matrix * *node_matrix);
+                // println!("Child has node matrix {:?}", child_matrix * *node_matrix);
                 to_append.push((child, child_matrix * *node_matrix));
             }
         }
+
+        print!("Next level: ");
+        for (node, _) in to_append.iter() {
+            print!("Node#{} ", node.index());
+        }
+        println!();
+
         if to_append.len() == 0 {
             break;
         }
@@ -232,6 +267,35 @@ fn main() {
             node.index(),
             node.children().count()
         );
+
+        if let Some(cam_data) = node.camera() {
+            if cam_data.index() != 0 {
+                println!("Skipping camera#{}", cam_data.index());
+            }
+            match cam_data.projection() {
+                gltf::camera::Projection::Orthographic(_) => {
+                    unimplemented!();
+                }
+                gltf::camera::Projection::Perspective(p) => {
+                    let (_scale, _rot, translation) =
+                        get_node_matrix(&node).to_scale_rotation_translation();
+                    println!("Setting camera radius to {}", translation.length());
+                    unsafe {
+                        CAMERA = Camera {
+                            pos: CameraPosition::SphericalAbout {
+                                origin: glam::Vec3::ZERO,
+                                radius: translation.length(),
+                                theta: 3.14 / 2.0,
+                                phi: 0.0,
+                            },
+                            zfar: p.zfar().unwrap(),
+                            znear: p.znear(),
+                        };
+                        SCROLL_FACTOR *= translation.length() / 3.0;
+                    }
+                }
+            }
+        }
 
         if let Some(mesh) = node.mesh() {
             for prim in mesh.primitives() {
@@ -355,8 +419,8 @@ fn main() {
             let proj_matrix = glam::Mat4::perspective_rh_gl(
                 90.0f32.to_radians() / aspect_ratio,
                 aspect_ratio,
-                0.1,
-                1000.0,
+                CAMERA.znear,
+                CAMERA.zfar,
             );
 
             let view_name = std::ffi::CString::new("u_view").unwrap();
@@ -416,26 +480,6 @@ fn main() {
     }
 }
 
-static mut MOUSE_X_POS: f64 = 0.0;
-static mut MOUSE_Y_POS: f64 = 0.0;
-static mut _CAMERA: Camera = Camera {
-    pos: CameraPosition::Absolute {
-        position: glam::Vec3::Z,
-        look_at: glam::Vec3::ZERO,
-    },
-};
-static mut CAMERA: Camera = Camera {
-    pos: CameraPosition::SphericalAbout {
-        origin: glam::Vec3::ZERO,
-        radius: 3.0,
-        theta: 3.14 / 2.0,
-        phi: 0.0,
-    },
-};
-static mut IS_PANNING: bool = false;
-static mut ORIGINAL_X: f64 = 0.0;
-static mut ORIGINAL_Y: f64 = 0.0;
-
 fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
     match event {
         glfw::WindowEvent::Key(Key::Escape, _, Action::Press, _) => window.set_should_close(true),
@@ -460,7 +504,7 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
                     theta: _,
                     phi: _,
                 } => {
-                    *radius -= (amount as f32) * 0.1;
+                    *radius -= (amount as f32) * SCROLL_FACTOR;
                 }
                 _ => {}
             }
