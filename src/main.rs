@@ -224,11 +224,11 @@ fn main() {
                 unsafe {
                     let mut vao = 0;
                     gl::GenVertexArrays(1, &mut vao);
-                    gl::BindVertexArray(vao);
 
                     let vertex_attrib = |(attrib_idx, sem)| {
                         let accessor = prim.get(sem).unwrap();
                         let vbo = buffers[accessor.view().unwrap().buffer().index()].0;
+                        gl::BindVertexArray(vao);
                         gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
                         let size = accessor.size();
                         let stride = accessor.view().unwrap().stride().unwrap_or(size);
@@ -253,6 +253,8 @@ fn main() {
                             offset as *const std::ffi::c_void,
                         );
                         gl::EnableVertexAttribArray(attrib_idx);
+                        gl::BindBuffer(gl::ARRAY_BUFFER, 0);
+                        gl::BindVertexArray(0);
                     };
                     vertex_attrib((0, &gltf::Semantic::Positions));
                     vertex_attrib((1, &gltf::Semantic::Normals));
@@ -281,6 +283,7 @@ fn main() {
                         std::mem::transmute(&indices[indices_offset]),
                         gl::STATIC_DRAW,
                     );
+                    gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, 0);
 
                     let material = prim.material();
                     let base_color: glam::Vec4 =
@@ -362,11 +365,9 @@ fn main() {
                 proj_matrix.to_cols_array().as_ptr(),
             );
 
-            let mut i = 0;
             for (vao, ebo, indices_offset, num_indices, base_color, node_matrix) in
                 primitives.iter()
             {
-                i += 1;
                 let color_name = std::ffi::CString::new("u_object_color").unwrap();
                 let color_loc = gl::GetUniformLocation(program, color_name.as_ptr() as *const i8);
                 gl::ProgramUniform4fv(program, color_loc, 1, base_color.to_array().as_ptr());
@@ -383,8 +384,10 @@ fn main() {
 
                 gl::UseProgram(program);
 
-                gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, *ebo);
+                // Note: Need to bind the VAO before the EBO, since the EBO will just point to the
+                // previous VAO otherwise.
                 gl::BindVertexArray(*vao);
+                gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, *ebo);
 
                 gl::DrawElements(
                     gl::TRIANGLES,
