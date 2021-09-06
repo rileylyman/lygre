@@ -163,8 +163,10 @@ fn main() {
     }
 
     let mut filepath = PathBuf::new();
-    filepath.push("res/scifi_helmet/scene.gltf");
+    // filepath.push("res/scifi_helmet/scene.gltf");
     // filepath.push("res/damaged_helmet/DamagedHelmet.gltf");
+    // filepath.push("res/box/Box.gltf");
+    filepath.push("res/duck/Duck.gltf");
     let document = gltf::Gltf::open(&filepath).unwrap();
 
     let mut raw_buffers = Vec::new();
@@ -284,7 +286,7 @@ fn main() {
                         CAMERA = Camera {
                             pos: CameraPosition::SphericalAbout {
                                 origin: glam::Vec3::ZERO,
-                                radius: translation.length(),
+                                radius: translation.length(), // TODO: doesnt work with duck
                                 theta: 3.14 / 2.0,
                                 phi: 0.0,
                             },
@@ -307,7 +309,11 @@ fn main() {
                     gl::GenVertexArrays(1, &mut vao);
 
                     let vertex_attrib = |(attrib_idx, sem)| {
-                        let accessor = prim.get(sem).unwrap();
+                        let accessor = if let Some(accessor) = prim.get(sem) {
+                            accessor
+                        } else {
+                            return;
+                        };
                         let vbo = buffers[accessor.view().unwrap().buffer().index()].0;
                         gl::BindVertexArray(vao);
                         gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
@@ -353,6 +359,7 @@ fn main() {
                     };
                     vertex_attrib((0, &gltf::Semantic::Positions));
                     vertex_attrib((1, &gltf::Semantic::Normals));
+                    vertex_attrib((2, &gltf::Semantic::TexCoords(0)));
 
                     let accessor = prim.indices().unwrap();
                     let indices = &buffers[accessor.view().unwrap().buffer().index()].1;
@@ -549,21 +556,22 @@ fn main() {
                 CAMERA.zfar,
             );
 
-            let view_name = std::ffi::CString::new("u_view").unwrap();
-            let loc = gl::GetUniformLocation(program, view_name.as_ptr() as *const i8);
+            let uniform_location = |s: &str| {
+                let name = std::ffi::CString::new(s).unwrap();
+                gl::GetUniformLocation(program, name.as_ptr() as *const i8)
+            };
+
             gl::ProgramUniformMatrix4fv(
                 program,
-                loc,
+                uniform_location("u_view"),
                 1,
                 gl::FALSE,
                 view_matrix.to_cols_array().as_ptr(),
             );
 
-            let proj_name = std::ffi::CString::new("u_proj").unwrap();
-            let other_loc = gl::GetUniformLocation(program, proj_name.as_ptr() as *const i8);
             gl::ProgramUniformMatrix4fv(
                 program,
-                other_loc,
+                uniform_location("u_proj"),
                 1,
                 gl::FALSE,
                 proj_matrix.to_cols_array().as_ptr(),
@@ -580,18 +588,27 @@ fn main() {
                 node_matrix,
             ) in primitives.iter()
             {
-                let color_name = std::ffi::CString::new("u_object_color").unwrap();
-                let color_loc = gl::GetUniformLocation(program, color_name.as_ptr() as *const i8);
-                gl::ProgramUniform4fv(program, color_loc, 1, base_color.to_array().as_ptr());
+                gl::ProgramUniform4fv(
+                    program,
+                    uniform_location("u_object_color"),
+                    1,
+                    base_color.to_array().as_ptr(),
+                );
 
-                let model_name = std::ffi::CString::new("u_model").unwrap();
-                let model_loc = gl::GetUniformLocation(program, model_name.as_ptr() as *const i8);
                 gl::ProgramUniformMatrix4fv(
                     program,
-                    model_loc,
+                    uniform_location("u_model"),
                     1,
                     gl::FALSE,
                     node_matrix.to_cols_array().as_ptr(),
+                );
+
+                gl::BindTexture(gl::TEXTURE_2D, tex_id.unwrap_or(0));
+                gl::ProgramUniform1ui(program, uniform_location("u_base_color_sampler"), 0);
+                gl::ProgramUniform1ui(
+                    program,
+                    uniform_location("u_base_color_sampler_exists"),
+                    tex_id.is_some() as u32,
                 );
 
                 gl::UseProgram(program);
@@ -691,6 +708,7 @@ const VERTEX_SOURCE: &'static str = "
 #version 330 core
 layout (location = 0) in vec3 a_pos;
 layout (location = 1) in vec3 a_normal;
+layout (location = 2) in vec2 a_uv;
 
 uniform mat4 u_model;
 uniform mat4 u_view;
@@ -700,10 +718,13 @@ out vec3 io_position;
 out vec3 io_light_pos;
 out vec3 io_normal;
 
+out vec2 io_uv;
+
 void main() {
   io_light_pos = vec3(u_view * vec4(0.0, 2.0, 1.0, 1.0));
   io_position = vec3(u_view * u_model * vec4(a_pos, 1.0));
   io_normal = vec3(u_view * u_model * vec4(a_normal, 0.0));
+  io_uv = a_uv;
 
   gl_Position = u_proj * u_view * u_model * vec4(a_pos, 1.0);
 }
@@ -715,8 +736,10 @@ const FRAG_SOURCE: &'static str = "
 out vec4 FragColor;
 
 vec4 k_light_color = vec4(1.0, 1.0, 1.0, 1.0);
-// vec4 k_object_color = vec4(0.8, 0.2, 0.2, 1.0);
 uniform vec4 u_object_color;
+
+uniform sampler2D u_base_color_sampler;
+uniform bool u_base_color_sampler_exists;
 
 float k_ambient_coefficient = 0.4;
 float k_diffuse_coefficient = 0.3;
@@ -726,6 +749,7 @@ float k_p = 16;
 in vec3 io_position;
 in vec3 io_light_pos;
 in vec3 io_normal;
+in vec2 io_uv;
 
 void main() {
 
@@ -734,7 +758,11 @@ void main() {
     vec3 halfway = normalize(to_camera + to_light);
     float dist2 = dot(to_light, to_light);
 
-    vec4 ambient_component = k_ambient_coefficient * u_object_color;
+    vec4 tex_component = texture(u_base_color_sampler, io_uv);
+    if (!u_base_color_sampler_exists) {
+        tex_component = vec4(1.0);
+    }
+    vec4 ambient_component = k_ambient_coefficient * u_object_color * tex_component;
 
     vec4 diffuse_component = k_diffuse_coefficient * (k_light_color / dist2) * max(0, dot(io_normal, to_light));
 
