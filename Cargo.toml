@@ -9,6 +9,7 @@ edition = "2018"
 gl = "0.14.0"
 glfw = "0.41.0"
 glam = "0.17.3"
+stb_image = "0.2.3"
 
 [dependencies.gltf]
 version = "0.16"

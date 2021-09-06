@@ -299,6 +299,9 @@ fn main() {
 
         if let Some(mesh) = node.mesh() {
             for prim in mesh.primitives() {
+                if gltf::mesh::Mode::Triangles != prim.mode() {
+                    todo!("We only handle triangle meshes for now.");
+                }
                 unsafe {
                     let mut vao = 0;
                     gl::GenVertexArrays(1, &mut vao);
@@ -381,6 +384,108 @@ fn main() {
                     let base_color: glam::Vec4 =
                         material.pbr_metallic_roughness().base_color_factor().into();
 
+                    let base_color_tex_id = material
+                        .pbr_metallic_roughness()
+                        .base_color_texture()
+                        .map(|info| {
+                            let mut tex_id = 0u32;
+                            gl::GenTextures(1, &mut tex_id);
+                            gl::BindTexture(gl::TEXTURE_2D, tex_id);
+
+                            let texture = info.texture();
+
+                            // Set up texture sampling parameters.
+                            let sampler = texture.sampler();
+                            if let Some(mag_filter) = sampler.mag_filter() {
+                                gl::TexParameteri(
+                                    gl::TEXTURE_2D,
+                                    gl::TEXTURE_MAG_FILTER,
+                                    mag_filter.as_gl_enum() as i32,
+                                );
+                            }
+                            if let Some(min_filter) = sampler.min_filter() {
+                                gl::TexParameteri(
+                                    gl::TEXTURE_2D,
+                                    gl::TEXTURE_MIN_FILTER,
+                                    min_filter.as_gl_enum() as i32,
+                                );
+                            }
+                            gl::TexParameteri(
+                                gl::TEXTURE_2D,
+                                gl::TEXTURE_WRAP_S,
+                                sampler.wrap_s().as_gl_enum() as i32,
+                            );
+                            gl::TexParameteri(
+                                gl::TEXTURE_2D,
+                                gl::TEXTURE_WRAP_T,
+                                sampler.wrap_t().as_gl_enum() as i32,
+                            );
+
+                            let fmt_from_depth = |depth, is_u8| {
+                                if depth == 1 {
+                                    (if is_u8 { gl::R8 } else { gl::R32F }, gl::RED)
+                                } else if depth == 2 {
+                                    (if is_u8 { gl::RG8 } else { gl::RG32F }, gl::RG)
+                                } else if depth == 3 {
+                                    (if is_u8 { gl::RGB8 } else { gl::RGB32F }, gl::RGB)
+                                } else if depth == 4 {
+                                    (if is_u8 { gl::RGBA8 } else { gl::RGBA32F }, gl::RGBA)
+                                } else {
+                                    panic!("Invalid depth for 8-bit image {}", depth)
+                                }
+                            };
+
+                            let image = texture.source();
+                            match image.source() {
+                                gltf::image::Source::Uri { uri, .. } => {
+                                    match stb_image::image::load(filepath.with_file_name(uri)) {
+                                        stb_image::image::LoadResult::Error(s) => panic!("{}", s),
+                                        stb_image::image::LoadResult::ImageU8(img) => {
+                                            println!(
+                                                "Loaded an 8-bit image with {} channels named {}",
+                                                img.depth, uri
+                                            );
+                                            gl::TexImage2D(
+                                                gl::TEXTURE_2D,
+                                                0,
+                                                fmt_from_depth(img.depth, true).0 as i32,
+                                                img.width as i32,
+                                                img.height as i32,
+                                                0,
+                                                fmt_from_depth(img.depth, true).1,
+                                                gl::UNSIGNED_BYTE,
+                                                img.data.as_ptr() as *const std::ffi::c_void,
+                                            );
+                                        }
+                                        stb_image::image::LoadResult::ImageF32(img) => {
+                                            println!(
+                                                "Loaded an 32-bit image with {} channels named {}",
+                                                img.depth, uri
+                                            );
+                                            gl::TexImage2D(
+                                                gl::TEXTURE_2D,
+                                                0,
+                                                fmt_from_depth(img.depth, false).0 as i32,
+                                                img.width as i32,
+                                                img.height as i32,
+                                                0,
+                                                fmt_from_depth(img.depth, false).1,
+                                                gl::FLOAT,
+                                                img.data.as_ptr() as *const std::ffi::c_void,
+                                            );
+                                        }
+                                    }
+                                }
+                                gltf::image::Source::View { .. } => {
+                                    unimplemented!();
+                                }
+                            }
+                            gl::GenerateMipmap(gl::TEXTURE_2D);
+                            gl::BindTexture(gl::TEXTURE_2D, 0);
+
+                            tex_id
+                        });
+
                     primitives.push((
                         vao,
                         ebo,
@@ -391,6 +496,7 @@ fn main() {
                             other => panic!("Invalid data type {:?} for indices", other),
                         },
                         0,
+                        base_color_tex_id,
                         accessor.count() as i32,
                         base_color,
                         node_matrix,
@@ -463,8 +569,16 @@ fn main() {
                 proj_matrix.to_cols_array().as_ptr(),
             );
 
-            for (vao, ebo, ebo_type, indices_offset, num_indices, base_color, node_matrix) in
-                primitives.iter()
+            for (
+                vao,
+                ebo,
+                ebo_type,
+                indices_offset,
+                tex_id,
+                num_indices,
+                base_color,
+                node_matrix,
+            ) in primitives.iter()
             {
                 let color_name = std::ffi::CString::new("u_object_color").unwrap();
                 let color_loc = gl::GetUniformLocation(program, color_name.as_ptr() as *const i8);
