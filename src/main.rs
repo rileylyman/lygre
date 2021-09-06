@@ -164,11 +164,11 @@ fn main() {
 
     let mut filepath = PathBuf::new();
     // filepath.push("res/scifi_helmet/scene.gltf");
-    // filepath.push("res/damaged_helmet/DamagedHelmet.gltf");
+    filepath.push("res/damaged_helmet/DamagedHelmet.gltf");
     // filepath.push("res/box/Box.gltf");
     // filepath.push("res/duck/Duck.gltf");
     // filepath.push("res/sponza/Sponza.gltf");
-    filepath.push("res/texcoordtest/TextureCoordinateTest.gltf");
+    // filepath.push("res/texcoordtest/TextureCoordinateTest.gltf");
     let document = gltf::Gltf::open(&filepath).unwrap();
 
     let mut raw_buffers = Vec::new();
@@ -436,9 +436,9 @@ fn main() {
                                 } else if depth == 2 {
                                     (if is_u8 { gl::RG8 } else { gl::RG32F }, gl::RG)
                                 } else if depth == 3 {
-                                    (if is_u8 { gl::RGB8 } else { gl::RGB32F }, gl::RGB)
+                                    (if is_u8 { gl::SRGB8 } else { gl::RGB32F }, gl::RGB)
                                 } else if depth == 4 {
-                                    (if is_u8 { gl::RGBA8 } else { gl::RGBA32F }, gl::RGBA)
+                                    (if is_u8 { gl::SRGB_ALPHA } else { gl::RGBA32F }, gl::RGBA)
                                 } else {
                                     panic!("Invalid depth for 8-bit image {}", depth)
                                 }
@@ -482,6 +482,9 @@ fn main() {
                                                 gl::FLOAT,
                                                 img.data.as_ptr() as *const std::ffi::c_void,
                                             );
+                                            todo!(
+                                                "I don't think this will work for sRGB textures."
+                                            );
                                         }
                                     }
                                 }
@@ -518,6 +521,7 @@ fn main() {
     unsafe {
         gl::Disable(gl::CULL_FACE);
         gl::Enable(gl::DEPTH_TEST);
+        gl::Enable(gl::FRAMEBUFFER_SRGB);
     }
 
     let (width, height) = window.get_framebuffer_size();
@@ -762,7 +766,7 @@ void main() {
     }
     vec4 ambient_component = k_ambient_coefficient * u_object_color * tex_component;
 
-    vec4 diffuse_component = k_diffuse_coefficient * (k_light_color / dist2) * max(0, dot(io_normal, to_light));
+    vec4 diffuse_component = k_diffuse_coefficient * (u_object_color * k_light_color / dist2) * max(0, dot(io_normal, to_light));
 
     vec4 specular_component = k_specular_coefficient * (k_light_color / dist2) * pow(max(0, dot(io_normal, halfway)), k_p);
 
