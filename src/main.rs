@@ -166,7 +166,9 @@ fn main() {
     // filepath.push("res/scifi_helmet/scene.gltf");
     // filepath.push("res/damaged_helmet/DamagedHelmet.gltf");
     // filepath.push("res/box/Box.gltf");
-    filepath.push("res/duck/Duck.gltf");
+    // filepath.push("res/duck/Duck.gltf");
+    // filepath.push("res/sponza/Sponza.gltf");
+    filepath.push("res/texcoordtest/TextureCoordinateTest.gltf");
     let document = gltf::Gltf::open(&filepath).unwrap();
 
     let mut raw_buffers = Vec::new();
@@ -534,7 +536,7 @@ fn main() {
     }
 
     unsafe {
-        gl::ClearColor(0.1, 0.1, 0.1, 1.0);
+        gl::ClearColor(0.5, 0.5, 0.5, 1.0);
     }
 
     while !window.should_close() {
@@ -641,10 +643,10 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
                 gl::Viewport(0, 0, new_x, new_y);
             }
         }
-        glfw::WindowEvent::MouseButton(glfw::MouseButton::Button3, glfw::Action::Press, _) => unsafe {
+        glfw::WindowEvent::MouseButton(glfw::MouseButton::Button1, glfw::Action::Press, _) => unsafe {
             IS_PANNING = true;
         },
-        glfw::WindowEvent::MouseButton(glfw::MouseButton::Button3, glfw::Action::Release, _) => unsafe {
+        glfw::WindowEvent::MouseButton(glfw::MouseButton::Button1, glfw::Action::Release, _) => unsafe {
             IS_PANNING = false;
         },
         glfw::WindowEvent::Scroll(_, amount) => unsafe {
@@ -684,13 +686,9 @@ fn handle_window_event(window: &mut glfw::Window, event: glfw::WindowEvent) {
                         ref mut phi,
                         ref mut theta,
                     } => {
-                        // println!("theta={}, phi={}", theta.to_degrees(), phi.to_degrees());
-                        if (x - ORIGINAL_X).abs() > (y - ORIGINAL_Y).abs() {
-                            *theta += (x - MOUSE_X_POS) as f32 * 0.002;
-                        } else {
-                            *phi += (y - MOUSE_Y_POS) as f32 * 0.008;
-                            *phi = phi.clamp(-3.14 / 2.0, 3.14 / 2.0);
-                        }
+                        *theta += (x - MOUSE_X_POS) as f32 * 0.004;
+                        *phi += (y - MOUSE_Y_POS) as f32 * 0.008;
+                        *phi = phi.clamp(-3.14 / 2.0, 3.14 / 2.0);
                     }
                 }
             } else {
