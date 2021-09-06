@@ -163,7 +163,7 @@ fn main() {
     }
 
     let mut filepath = PathBuf::new();
-    filepath.push("res/2cylinder/2CylinderEngine.gltf");
+    filepath.push("res/scifi_helmet/scene.gltf");
     // filepath.push("res/damaged_helmet/DamagedHelmet.gltf");
     let document = gltf::Gltf::open(&filepath).unwrap();
 
@@ -308,24 +308,38 @@ fn main() {
                         let vbo = buffers[accessor.view().unwrap().buffer().index()].0;
                         gl::BindVertexArray(vao);
                         gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-                        let size = accessor.size();
-                        let stride = accessor.view().unwrap().stride().unwrap_or(size);
+                        let attribute_size_bytes = accessor.size();
+                        let attribute_multipicity = accessor.dimensions().multiplicity();
+                        let stride = accessor
+                            .view()
+                            .unwrap()
+                            .stride()
+                            .unwrap_or(attribute_size_bytes);
                         let offset = accessor.offset() + accessor.view().unwrap().offset();
+
                         println!(
-                            "Got accessor {{ componentType = {:?}, type = {:?} }}",
+                            "Got accessor {{ size = {}, dimesions = {:?}, multiplicity = {}, normalized = {}, type = {:?} }}",
+                            accessor.size(),
                             accessor.dimensions(),
+                            accessor.dimensions().multiplicity(),
+                            accessor.normalized(),
                             accessor.data_type()
                         );
 
-                        println!(
-                            "Setting vertex_attrib {} for vbo={} as size={}, stride={}, offset={}",
-                            attrib_idx, vbo, size, stride, offset
-                        );
+                        // println!(
+                        //     "Setting vertex_attrib {} for vbo={} as size={}, stride={}, offset={}",
+                        //     attrib_idx, vbo, size, stride, offset
+                        // );
                         gl::VertexAttribPointer(
                             attrib_idx,
-                            (size / 4) as i32,
-                            gl::FLOAT,
-                            gl::FALSE,
+                            attribute_multipicity as i32,
+                            match accessor.data_type() {
+                                gltf::accessor::DataType::F32 => gl::FLOAT,
+                                other => {
+                                    panic!("Wrong type for vertex attribute component: {:?}", other)
+                                }
+                            },
+                            accessor.normalized() as u8,
                             stride as i32,
                             // .unwrap_or(size * std::mem::size_of::<f32>().try_into().unwrap()),
                             offset as *const std::ffi::c_void,
@@ -340,12 +354,12 @@ fn main() {
                     let accessor = prim.indices().unwrap();
                     let indices = &buffers[accessor.view().unwrap().buffer().index()].1;
                     let indices_offset = accessor.offset() + accessor.view().unwrap().offset();
-                    println!(
-                        "accessor.size()={}, accessor.count()={}, indices_offset={}",
-                        accessor.size(),
-                        accessor.count(),
-                        indices_offset,
-                    );
+                    // println!(
+                    //     "accessor.size()={}, accessor.count()={}, indices_offset={}",
+                    //     accessor.size(),
+                    //     accessor.count(),
+                    //     indices_offset,
+                    // );
 
                     println!(
                         "Buffering {} indices in total",
@@ -370,6 +384,12 @@ fn main() {
                     primitives.push((
                         vao,
                         ebo,
+                        match accessor.data_type() {
+                            gltf::accessor::DataType::U8 => gl::UNSIGNED_BYTE,
+                            gltf::accessor::DataType::U16 => gl::UNSIGNED_SHORT,
+                            gltf::accessor::DataType::U32 => gl::UNSIGNED_INT,
+                            other => panic!("Invalid data type {:?} for indices", other),
+                        },
                         0,
                         accessor.count() as i32,
                         base_color,
@@ -443,7 +463,7 @@ fn main() {
                 proj_matrix.to_cols_array().as_ptr(),
             );
 
-            for (vao, ebo, indices_offset, num_indices, base_color, node_matrix) in
+            for (vao, ebo, ebo_type, indices_offset, num_indices, base_color, node_matrix) in
                 primitives.iter()
             {
                 let color_name = std::ffi::CString::new("u_object_color").unwrap();
@@ -470,7 +490,7 @@ fn main() {
                 gl::DrawElements(
                     gl::TRIANGLES,
                     *num_indices,
-                    gl::UNSIGNED_SHORT,
+                    *ebo_type,
                     *indices_offset as *const std::ffi::c_void,
                 );
             }
