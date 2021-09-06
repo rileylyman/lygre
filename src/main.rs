@@ -1,5 +1,4 @@
 use glfw::{Action, Context, Key};
-use std::convert::TryInto;
 
 enum CameraPosition {
     SphericalAbout {
@@ -53,12 +52,7 @@ fn main() {
         glfw::OpenGlProfileHint::Core,
     ));
     let (mut window, events) = glfw
-        .create_window(
-            1600,
-            1080,
-            "Hello this is window",
-            glfw::WindowMode::Windowed,
-        )
+        .create_window(1600, 1080, "Lygre: glTF Loader", glfw::WindowMode::Windowed)
         .expect("Failed to create GLFW window.");
 
     window.make_current();
@@ -189,7 +183,11 @@ fn main() {
         .nodes()
         .map(|node| {
             let node_matrix = get_node_matrix(&node);
-            println!("Initial levels has node {}", node.index());
+            println!(
+                "Initial levels has node {} with matrix {:?}",
+                node.index(),
+                node_matrix
+            );
             (node, node_matrix)
         })
         .collect::<Vec<_>>()];
@@ -201,6 +199,7 @@ fn main() {
             for child in node.children() {
                 println!("pushing child with index {}", child.index());
                 let child_matrix = get_node_matrix(&child);
+                println!("Child has node matrix {:?}", child_matrix * *node_matrix);
                 to_append.push((child, child_matrix * *node_matrix));
             }
         }
@@ -332,6 +331,7 @@ fn main() {
 
         unsafe {
             let view_matrix = CAMERA.get_view();
+            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
 
             let (width, height) = window.get_framebuffer_size();
             let aspect_ratio = width as f32 / height as f32;
@@ -362,9 +362,11 @@ fn main() {
                 proj_matrix.to_cols_array().as_ptr(),
             );
 
+            let mut i = 0;
             for (vao, ebo, indices_offset, num_indices, base_color, node_matrix) in
                 primitives.iter()
             {
+                i += 1;
                 let color_name = std::ffi::CString::new("u_object_color").unwrap();
                 let color_loc = gl::GetUniformLocation(program, color_name.as_ptr() as *const i8);
                 gl::ProgramUniform4fv(program, color_loc, 1, base_color.to_array().as_ptr());
@@ -384,7 +386,6 @@ fn main() {
                 gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, *ebo);
                 gl::BindVertexArray(*vao);
 
-                gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
                 gl::DrawElements(
                     gl::TRIANGLES,
                     *num_indices,
