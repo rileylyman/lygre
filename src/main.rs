@@ -242,7 +242,29 @@ fn main() {
                     let base_color: glam::Vec4 =
                         material.pbr_metallic_roughness().base_color_factor().into();
 
-                    primitives.push((vao, ebo, 0, accessor.count() as i32, base_color));
+                    let node_matrix = match node.transform() {
+                        gltf::scene::Transform::Matrix { matrix } => {
+                            glam::Mat4::from_cols_array_2d(&matrix)
+                        }
+                        gltf::scene::Transform::Decomposed {
+                            translation,
+                            rotation,
+                            scale,
+                        } => glam::Mat4::from_scale_rotation_translation(
+                            glam::Vec3::from_slice(&scale[..]),
+                            glam::Quat::from_array(rotation),
+                            glam::Vec3::from_slice(&translation[..]),
+                        ),
+                    };
+
+                    primitives.push((
+                        vao,
+                        ebo,
+                        0,
+                        accessor.count() as i32,
+                        base_color,
+                        node_matrix,
+                    ));
                 }
             }
         }
@@ -310,10 +332,22 @@ fn main() {
                 proj_matrix.to_cols_array().as_ptr(),
             );
 
-            for (vao, ebo, indices_offset, num_indices, base_color) in primitives.iter() {
+            for (vao, ebo, indices_offset, num_indices, base_color, node_matrix) in
+                primitives.iter()
+            {
                 let color_name = std::ffi::CString::new("u_object_color").unwrap();
                 let color_loc = gl::GetUniformLocation(program, color_name.as_ptr() as *const i8);
                 gl::ProgramUniform4fv(program, color_loc, 1, base_color.to_array().as_ptr());
+
+                let model_name = std::ffi::CString::new("u_model").unwrap();
+                let model_loc = gl::GetUniformLocation(program, model_name.as_ptr() as *const i8);
+                gl::ProgramUniformMatrix4fv(
+                    program,
+                    model_loc,
+                    1,
+                    gl::FALSE,
+                    node_matrix.to_cols_array().as_ptr(),
+                );
 
                 gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, *ebo);
                 // gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
@@ -433,6 +467,7 @@ const VERTEX_SOURCE: &'static str = "
 layout (location = 0) in vec3 a_pos;
 layout (location = 1) in vec3 a_normal;
 
+uniform mat4 u_model;
 uniform mat4 u_view;
 uniform mat4 u_proj;
 
@@ -442,10 +477,10 @@ out vec3 io_normal;
 
 void main() {
   io_light_pos = vec3(u_view * vec4(0.0, 2.0, 1.0, 1.0));
-  io_position = vec3(u_view * vec4(a_pos, 1.0));
-  io_normal = vec3(u_view * vec4(a_normal, 0.0));
+  io_position = vec3(u_view * u_model * vec4(a_pos, 1.0));
+  io_normal = vec3(u_view * u_model * vec4(a_normal, 0.0));
 
-  gl_Position = u_proj * u_view * vec4(a_pos, 1.0);
+  gl_Position = u_proj * u_view * u_model * vec4(a_pos, 1.0);
 }
 ";
 
