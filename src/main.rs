@@ -140,8 +140,8 @@ fn main() {
         gl::DeleteShader(fshader);
     }
 
-    let document = gltf::Gltf::open("res/damaged_helmet/DamagedHelmet.gltf").unwrap();
-    let raw_buffers = vec![std::fs::read("res/damaged_helmet/DamagedHelmet.bin").unwrap()];
+    let document = gltf::Gltf::open("res/spheres/glTF/MetalRoughSpheres.gltf").unwrap();
+    let raw_buffers = vec![std::fs::read("res/spheres/glTF/MetalRoughSpheres0.bin").unwrap()];
 
     let mut buffers = Vec::new();
     for rb in raw_buffers {
@@ -349,19 +349,20 @@ fn main() {
                     node_matrix.to_cols_array().as_ptr(),
                 );
 
-                gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, *ebo);
-                // gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-                gl::BindVertexArray(*vao);
                 gl::UseProgram(program);
-                //gl::ClearColor(0.1, 0.1, 0.1, 1.0);
+
+                gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, *ebo);
+                gl::BindVertexArray(*vao);
+
                 gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-                // gl::DrawArrays(gl::TRIANGLES, 0, 6 * 6);
                 gl::DrawElements(
                     gl::TRIANGLES,
                     *num_indices,
                     gl::UNSIGNED_SHORT,
                     *indices_offset as *const std::ffi::c_void,
                 );
+
+                break;
             }
         }
 
