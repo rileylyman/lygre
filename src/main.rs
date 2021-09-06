@@ -140,7 +140,8 @@ fn main() {
         gl::DeleteShader(fshader);
     }
 
-    let (document, raw_buffers, _images) = gltf::import("res/Box.gltf").unwrap();
+    let document = gltf::Gltf::open("res/damaged_helmet/DamagedHelmet.gltf").unwrap();
+    let raw_buffers = vec![std::fs::read("res/damaged_helmet/DamagedHelmet.bin").unwrap()];
 
     let mut buffers = Vec::new();
     for rb in raw_buffers {
@@ -149,14 +150,14 @@ fn main() {
 
             gl::GenBuffers(1, &mut vbo);
 
-            let num_bytes = rb.0.len() as isize;
+            let num_bytes = rb.len() as isize;
             println!("Buffering num_bytes={}", num_bytes);
 
             gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
             gl::BufferData(
                 gl::ARRAY_BUFFER,
                 num_bytes,
-                std::mem::transmute(rb.0[..].as_ptr()),
+                std::mem::transmute(rb[..].as_ptr()),
                 gl::STATIC_DRAW,
             );
 
@@ -186,8 +187,13 @@ fn main() {
                         let vbo = buffers[accessor.view().unwrap().buffer().index()].0;
                         gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
                         let size = accessor.size();
-                        let stride = accessor.view().unwrap().stride().unwrap();
+                        let stride = accessor.view().unwrap().stride().unwrap_or(size);
                         let offset = accessor.offset() + accessor.view().unwrap().offset();
+                        println!(
+                            "Got accessor {{ componentType = {:?}, type = {:?} }}",
+                            accessor.dimensions(),
+                            accessor.data_type()
+                        );
 
                         println!(
                             "Setting vertex_attrib {} for vbo={} as size={}, stride={}, offset={}",
