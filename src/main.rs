@@ -163,8 +163,8 @@ fn main() {
     }
 
     let mut filepath = PathBuf::new();
-    // filepath.push("res/2cylinder/2CylinderEngine.gltf");
-    filepath.push("res/damaged_helmet/DamagedHelmet.gltf");
+    filepath.push("res/2cylinder/2CylinderEngine.gltf");
+    // filepath.push("res/damaged_helmet/DamagedHelmet.gltf");
     let document = gltf::Gltf::open(&filepath).unwrap();
 
     let mut raw_buffers = Vec::new();
@@ -242,7 +242,7 @@ fn main() {
             for child in node.children() {
                 let child_matrix = get_node_matrix(&child);
                 // println!("Child has node matrix {:?}", child_matrix * *node_matrix);
-                to_append.push((child, child_matrix * *node_matrix));
+                to_append.push((child, *node_matrix * child_matrix));
             }
         }
 
@@ -584,7 +584,7 @@ vec4 k_light_color = vec4(1.0, 1.0, 1.0, 1.0);
 // vec4 k_object_color = vec4(0.8, 0.2, 0.2, 1.0);
 uniform vec4 u_object_color;
 
-float k_ambient_coefficient = 0.3;
+float k_ambient_coefficient = 0.4;
 float k_diffuse_coefficient = 0.3;
 float k_specular_coefficient = 0.3;
 float k_p = 16;
