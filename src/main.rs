@@ -26,6 +26,7 @@ static mut IS_PANNING: bool = false;
 static mut ORIGINAL_X: f64 = 0.0;
 static mut ORIGINAL_Y: f64 = 0.0;
 
+static mut CAMERA_ORIGINAL_RADIUS: f32 = 3.0;
 enum CameraPosition {
     SphericalAbout {
         origin: glam::Vec3,
@@ -163,12 +164,12 @@ fn main() {
     }
 
     let mut filepath = PathBuf::new();
-    filepath.push("res/scifi_helmet/scene.gltf");
+    // filepath.push("res/scifi_helmet/scene.gltf");
     // filepath.push("res/damaged_helmet/DamagedHelmet.gltf");
     // filepath.push("res/box/Box.gltf");
     // filepath.push("res/duck/Duck.gltf");
     // filepath.push("res/sponza/Sponza.gltf");
-    // filepath.push("res/texcoordtest/TextureCoordinateTest.gltf");
+    filepath.push("res/texcoordtest/TextureCoordinateTest.gltf");
     let document = gltf::Gltf::open(&filepath).unwrap();
 
     let mut raw_buffers = Vec::new();
@@ -296,6 +297,7 @@ fn main() {
                             znear: p.znear(),
                         };
                         SCROLL_FACTOR *= translation.length() / 3.0;
+                        CAMERA_ORIGINAL_RADIUS = translation.length();
                     }
                 }
             }
@@ -521,14 +523,17 @@ fn main() {
                             assert!(info.tex_coord() == 0);
                             generate_texture(&info.texture(), true)
                         });
-                    let normal_tex_id = material.normal_texture().map(|normal_texture| {
+                    let normal_tex_data = material.normal_texture().map(|normal_texture| {
                         assert!(normal_texture.tex_coord() == 0);
-                        generate_texture(&normal_texture.texture(), false)
+                        (
+                            generate_texture(&normal_texture.texture(), false),
+                            normal_texture.scale(),
+                        )
                     });
 
                     println!(
-                        "base_color_tex_id={:?}, normal_tex_id={:?}",
-                        base_color_tex_id, normal_tex_id
+                        "base_color_tex_id={:?}, normal_tex_data={:?}",
+                        base_color_tex_id, normal_tex_data
                     );
 
                     primitives.push((
@@ -542,7 +547,7 @@ fn main() {
                         },
                         0,
                         base_color_tex_id,
-                        normal_tex_id,
+                        normal_tex_data,
                         accessor.count() as i32,
                         base_color,
                         node_matrix,
@@ -619,13 +624,19 @@ fn main() {
                 proj_matrix.to_cols_array().as_ptr(),
             );
 
+            gl::ProgramUniform1f(
+                program,
+                uniform_location("u_camera_radius"),
+                CAMERA_ORIGINAL_RADIUS,
+            );
+
             for (
                 vao,
                 ebo,
                 ebo_type,
                 indices_offset,
                 base_color_tex_id,
-                normal_tex_id,
+                normal_tex_data,
                 num_indices,
                 base_color,
                 node_matrix,
@@ -648,7 +659,7 @@ fn main() {
 
                 gl::ActiveTexture(gl::TEXTURE0);
                 gl::BindTexture(gl::TEXTURE_2D, base_color_tex_id.unwrap_or(0));
-                gl::ProgramUniform1ui(program, uniform_location("u_base_color_sampler"), 0);
+                gl::ProgramUniform1i(program, uniform_location("u_base_color_sampler"), 0);
                 gl::ProgramUniform1ui(
                     program,
                     uniform_location("u_base_color_sampler_exists"),
@@ -656,14 +667,18 @@ fn main() {
                 );
 
                 gl::ActiveTexture(gl::TEXTURE1);
-                gl::BindTexture(gl::TEXTURE_2D, normal_tex_id.unwrap_or(0));
-                gl::ProgramUniform1ui(program, uniform_location("u_normal_texture"), 1);
+                gl::BindTexture(gl::TEXTURE_2D, normal_tex_data.unwrap_or((0, 0.0)).0);
+                gl::ProgramUniform1i(program, uniform_location("u_normal_texture"), 1);
                 gl::ProgramUniform1ui(
                     program,
                     uniform_location("u_normal_texture_exists"),
-                    normal_tex_id.is_some() as u32,
+                    normal_tex_data.is_some() as u32,
                 );
-                gl::ProgramUniform1f(program, uniform_location("u_normal_scale"), 0.8);
+                gl::ProgramUniform1f(
+                    program,
+                    uniform_location("u_normal_scale"),
+                    normal_tex_data.unwrap_or((0, 0.0)).1,
+                );
 
                 gl::UseProgram(program);
 
@@ -764,9 +779,10 @@ layout (location = 3) in vec4 a_tangent;
 uniform mat4 u_model;
 uniform mat4 u_view;
 uniform mat4 u_proj;
+uniform float u_camera_radius;
 
 out vec3 io_position;
-out vec3 io_light_pos;
+out vec3 io_light_pos[2];
 out vec3 io_normal;
 out vec2 io_uv;
 out mat3 io_tbn;
@@ -779,7 +795,8 @@ void main() {
   vec3 view_tangent = vec3(u_view * u_model * vec4(a_tangent.xyz, 0.0));
   io_tbn = mat3(view_tangent, view_bitangent, view_normal);
 
-  io_light_pos = vec3(u_view * vec4(0.0, 2.0, 1.0, 1.0));
+  io_light_pos[0] = vec3(u_view * vec4(0.0, u_camera_radius / 2.0, -u_camera_radius, 1.0));
+  io_light_pos[1] = vec3(u_view * vec4(0.0, u_camera_radius, u_camera_radius, 1.0));
   io_position = vec3(u_view * u_model * vec4(a_pos, 1.0));
   io_normal = view_normal;
   io_uv = a_uv;
@@ -809,7 +826,7 @@ float k_specular_coefficient = 0.3;
 float k_p = 16;
 
 in vec3 io_position;
-in vec3 io_light_pos;
+in vec3 io_light_pos[2];
 in vec3 io_normal;
 in vec2 io_uv;
 in mat3 io_tbn;
@@ -818,27 +835,33 @@ void main() {
 
     vec3 normal = io_normal;
     if (u_normal_texture_exists) {
-        normal = io_tbn * texture(u_normal_texture, io_uv).xyz;
+        normal = io_tbn * (texture(u_normal_texture, io_uv).xyz * 2.0 - 1.0);
     }
 
-    vec3 to_light = normalize(io_light_pos - io_position);
-    vec3 to_camera = normalize(-io_position);
-    vec3 halfway = normalize(to_camera + to_light);
-    float dist2 = dot(to_light, to_light);
 
-    vec4 tex_component = texture(u_base_color_sampler, io_uv);
-    if (!u_base_color_sampler_exists) {
-        tex_component = vec4(1.0);
+    vec4 result = vec4(0.0);
+    for (int i = 0; i < 2; i++) {
+        vec3 to_light = normalize(io_light_pos[i] - io_position);
+        vec3 to_camera = normalize(-io_position);
+        vec3 halfway = normalize(to_camera + to_light);
+        float dist2 = dot(to_light, to_light);
+
+        vec4 tex_component = texture(u_base_color_sampler, io_uv);
+        if (!u_base_color_sampler_exists) {
+            tex_component = vec4(1.0);
+        }
+        vec4 ambient_component = k_ambient_coefficient * u_base_color_factor * tex_component;
+
+        vec4 diffuse_component = k_diffuse_coefficient * ((u_base_color_factor) / dist2) * max(0, dot(normal, to_light));
+
+        vec4 specular_component = k_specular_coefficient * (k_light_color / dist2) * pow(max(0, dot(normal, halfway)), k_p);
+
+        result += ambient_component + diffuse_component + specular_component; 
     }
-    vec4 ambient_component = k_ambient_coefficient * u_base_color_factor * tex_component;
 
-    vec4 diffuse_component = k_diffuse_coefficient * (u_base_color_factor * k_light_color / dist2) * max(0, dot(normal, to_light));
-
-    vec4 specular_component = k_specular_coefficient * (k_light_color / dist2) * pow(max(0, dot(normal, halfway)), k_p);
-
-    // FragColor = ambient_component + diffuse_component + specular_component;
+    FragColor = result / 2.0;
     // FragColor = abs(vec4(io_tbn * vec3(0.0, 0.0, 1.0), 1.0));
-    FragColor = vec4(texture(u_normal_texture, io_uv));
+    // FragColor = vec4(texture(u_base_color_sampler, io_uv));
 }
 ";
 
