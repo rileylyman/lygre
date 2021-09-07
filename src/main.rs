@@ -163,8 +163,8 @@ fn main() {
     }
 
     let mut filepath = PathBuf::new();
-    // filepath.push("res/scifi_helmet/scene.gltf");
-    filepath.push("res/damaged_helmet/DamagedHelmet.gltf");
+    filepath.push("res/scifi_helmet/scene.gltf");
+    // filepath.push("res/damaged_helmet/DamagedHelmet.gltf");
     // filepath.push("res/box/Box.gltf");
     // filepath.push("res/duck/Duck.gltf");
     // filepath.push("res/sponza/Sponza.gltf");
@@ -362,6 +362,7 @@ fn main() {
                     vertex_attrib((0, &gltf::Semantic::Positions));
                     vertex_attrib((1, &gltf::Semantic::Normals));
                     vertex_attrib((2, &gltf::Semantic::TexCoords(0)));
+                    vertex_attrib((3, &gltf::Semantic::Tangents));
 
                     let accessor = prim.indices().unwrap();
                     let indices = &buffers[accessor.view().unwrap().buffer().index()].1;
@@ -393,110 +394,142 @@ fn main() {
                     let base_color: glam::Vec4 =
                         material.pbr_metallic_roughness().base_color_factor().into();
 
+                    let generate_texture = |texture: &gltf::texture::Texture, srgb_remap: bool| {
+                        let mut tex_id = 0u32;
+                        gl::GenTextures(1, &mut tex_id);
+                        gl::BindTexture(gl::TEXTURE_2D, tex_id);
+
+                        // Set up texture sampling parameters.
+                        let sampler = texture.sampler();
+                        if let Some(mag_filter) = sampler.mag_filter() {
+                            gl::TexParameteri(
+                                gl::TEXTURE_2D,
+                                gl::TEXTURE_MAG_FILTER,
+                                mag_filter.as_gl_enum() as i32,
+                            );
+                        }
+                        if let Some(min_filter) = sampler.min_filter() {
+                            gl::TexParameteri(
+                                gl::TEXTURE_2D,
+                                gl::TEXTURE_MIN_FILTER,
+                                min_filter.as_gl_enum() as i32,
+                            );
+                        }
+                        gl::TexParameteri(
+                            gl::TEXTURE_2D,
+                            gl::TEXTURE_WRAP_S,
+                            sampler.wrap_s().as_gl_enum() as i32,
+                        );
+                        gl::TexParameteri(
+                            gl::TEXTURE_2D,
+                            gl::TEXTURE_WRAP_T,
+                            sampler.wrap_t().as_gl_enum() as i32,
+                        );
+
+                        let fmt_from_depth = |depth, is_u8| {
+                            if depth == 1 {
+                                (if is_u8 { gl::R8 } else { gl::R32F }, gl::RED)
+                            } else if depth == 2 {
+                                (if is_u8 { gl::RG8 } else { gl::RG32F }, gl::RG)
+                            } else if depth == 3 {
+                                (
+                                    if is_u8 {
+                                        if srgb_remap {
+                                            gl::SRGB8
+                                        } else {
+                                            gl::RGB8
+                                        }
+                                    } else {
+                                        gl::RGB32F
+                                    },
+                                    gl::RGB,
+                                )
+                            } else if depth == 4 {
+                                (
+                                    if is_u8 {
+                                        if srgb_remap {
+                                            gl::SRGB_ALPHA
+                                        } else {
+                                            gl::RGBA8
+                                        }
+                                    } else {
+                                        gl::RGBA32F
+                                    },
+                                    gl::RGBA,
+                                )
+                            } else {
+                                panic!("Invalid depth for 8-bit image {}", depth)
+                            }
+                        };
+
+                        let image = texture.source();
+                        match image.source() {
+                            gltf::image::Source::Uri { uri, .. } => {
+                                match stb_image::image::load(filepath.with_file_name(uri)) {
+                                    stb_image::image::LoadResult::Error(s) => panic!("{}", s),
+                                    stb_image::image::LoadResult::ImageU8(img) => {
+                                        println!(
+                                            "Loaded an 8-bit image with {} channels named {}",
+                                            img.depth, uri
+                                        );
+                                        gl::TexImage2D(
+                                            gl::TEXTURE_2D,
+                                            0,
+                                            fmt_from_depth(img.depth, true).0 as i32,
+                                            img.width as i32,
+                                            img.height as i32,
+                                            0,
+                                            fmt_from_depth(img.depth, true).1,
+                                            gl::UNSIGNED_BYTE,
+                                            img.data.as_ptr() as *const std::ffi::c_void,
+                                        );
+                                    }
+                                    stb_image::image::LoadResult::ImageF32(img) => {
+                                        println!(
+                                            "Loaded an 32-bit image with {} channels named {}",
+                                            img.depth, uri
+                                        );
+                                        gl::TexImage2D(
+                                            gl::TEXTURE_2D,
+                                            0,
+                                            fmt_from_depth(img.depth, false).0 as i32,
+                                            img.width as i32,
+                                            img.height as i32,
+                                            0,
+                                            fmt_from_depth(img.depth, false).1,
+                                            gl::FLOAT,
+                                            img.data.as_ptr() as *const std::ffi::c_void,
+                                        );
+                                        todo!("I don't think this will work for sRGB textures.");
+                                    }
+                                }
+                            }
+                            gltf::image::Source::View { .. } => {
+                                unimplemented!();
+                            }
+                        }
+                        gl::GenerateMipmap(gl::TEXTURE_2D);
+                        gl::BindTexture(gl::TEXTURE_2D, 0);
+
+                        tex_id
+                    };
+
                     let base_color_tex_id = material
                         .pbr_metallic_roughness()
                         .base_color_texture()
                         .map(|info| {
-                            let mut tex_id = 0u32;
-                            gl::GenTextures(1, &mut tex_id);
-                            gl::BindTexture(gl::TEXTURE_2D, tex_id);
-
-                            let texture = info.texture();
-
-                            // Set up texture sampling parameters.
-                            let sampler = texture.sampler();
-                            if let Some(mag_filter) = sampler.mag_filter() {
-                                gl::TexParameteri(
-                                    gl::TEXTURE_2D,
-                                    gl::TEXTURE_MAG_FILTER,
-                                    mag_filter.as_gl_enum() as i32,
-                                );
-                            }
-                            if let Some(min_filter) = sampler.min_filter() {
-                                gl::TexParameteri(
-                                    gl::TEXTURE_2D,
-                                    gl::TEXTURE_MIN_FILTER,
-                                    min_filter.as_gl_enum() as i32,
-                                );
-                            }
-                            gl::TexParameteri(
-                                gl::TEXTURE_2D,
-                                gl::TEXTURE_WRAP_S,
-                                sampler.wrap_s().as_gl_enum() as i32,
-                            );
-                            gl::TexParameteri(
-                                gl::TEXTURE_2D,
-                                gl::TEXTURE_WRAP_T,
-                                sampler.wrap_t().as_gl_enum() as i32,
-                            );
-
-                            let fmt_from_depth = |depth, is_u8| {
-                                if depth == 1 {
-                                    (if is_u8 { gl::R8 } else { gl::R32F }, gl::RED)
-                                } else if depth == 2 {
-                                    (if is_u8 { gl::RG8 } else { gl::RG32F }, gl::RG)
-                                } else if depth == 3 {
-                                    (if is_u8 { gl::SRGB8 } else { gl::RGB32F }, gl::RGB)
-                                } else if depth == 4 {
-                                    (if is_u8 { gl::SRGB_ALPHA } else { gl::RGBA32F }, gl::RGBA)
-                                } else {
-                                    panic!("Invalid depth for 8-bit image {}", depth)
-                                }
-                            };
-
-                            let image = texture.source();
-                            match image.source() {
-                                gltf::image::Source::Uri { uri, .. } => {
-                                    match stb_image::image::load(filepath.with_file_name(uri)) {
-                                        stb_image::image::LoadResult::Error(s) => panic!("{}", s),
-                                        stb_image::image::LoadResult::ImageU8(img) => {
-                                            println!(
-                                                "Loaded an 8-bit image with {} channels named {}",
-                                                img.depth, uri
-                                            );
-                                            gl::TexImage2D(
-                                                gl::TEXTURE_2D,
-                                                0,
-                                                fmt_from_depth(img.depth, true).0 as i32,
-                                                img.width as i32,
-                                                img.height as i32,
-                                                0,
-                                                fmt_from_depth(img.depth, true).1,
-                                                gl::UNSIGNED_BYTE,
-                                                img.data.as_ptr() as *const std::ffi::c_void,
-                                            );
-                                        }
-                                        stb_image::image::LoadResult::ImageF32(img) => {
-                                            println!(
-                                                "Loaded an 32-bit image with {} channels named {}",
-                                                img.depth, uri
-                                            );
-                                            gl::TexImage2D(
-                                                gl::TEXTURE_2D,
-                                                0,
-                                                fmt_from_depth(img.depth, false).0 as i32,
-                                                img.width as i32,
-                                                img.height as i32,
-                                                0,
-                                                fmt_from_depth(img.depth, false).1,
-                                                gl::FLOAT,
-                                                img.data.as_ptr() as *const std::ffi::c_void,
-                                            );
-                                            todo!(
-                                                "I don't think this will work for sRGB textures."
-                                            );
-                                        }
-                                    }
-                                }
-                                gltf::image::Source::View { .. } => {
-                                    unimplemented!();
-                                }
-                            }
-                            gl::GenerateMipmap(gl::TEXTURE_2D);
-                            gl::BindTexture(gl::TEXTURE_2D, 0);
-
-                            tex_id
+                            assert!(info.tex_coord() == 0);
+                            generate_texture(&info.texture(), true)
                         });
+                    let normal_tex_id = material.normal_texture().map(|normal_texture| {
+                        assert!(normal_texture.tex_coord() == 0);
+                        generate_texture(&normal_texture.texture(), false)
+                    });
+
+                    println!(
+                        "base_color_tex_id={:?}, normal_tex_id={:?}",
+                        base_color_tex_id, normal_tex_id
+                    );
 
                     primitives.push((
                         vao,
@@ -509,6 +542,7 @@ fn main() {
                         },
                         0,
                         base_color_tex_id,
+                        normal_tex_id,
                         accessor.count() as i32,
                         base_color,
                         node_matrix,
@@ -564,7 +598,9 @@ fn main() {
 
             let uniform_location = |s: &str| {
                 let name = std::ffi::CString::new(s).unwrap();
-                gl::GetUniformLocation(program, name.as_ptr() as *const i8)
+                let loc = gl::GetUniformLocation(program, name.as_ptr() as *const i8);
+                // println!("Location of {:?} is {}", name, loc);
+                loc
             };
 
             gl::ProgramUniformMatrix4fv(
@@ -588,7 +624,8 @@ fn main() {
                 ebo,
                 ebo_type,
                 indices_offset,
-                tex_id,
+                base_color_tex_id,
+                normal_tex_id,
                 num_indices,
                 base_color,
                 node_matrix,
@@ -596,7 +633,7 @@ fn main() {
             {
                 gl::ProgramUniform4fv(
                     program,
-                    uniform_location("u_object_color"),
+                    uniform_location("u_base_color_factor"),
                     1,
                     base_color.to_array().as_ptr(),
                 );
@@ -609,13 +646,24 @@ fn main() {
                     node_matrix.to_cols_array().as_ptr(),
                 );
 
-                gl::BindTexture(gl::TEXTURE_2D, tex_id.unwrap_or(0));
+                gl::ActiveTexture(gl::TEXTURE0);
+                gl::BindTexture(gl::TEXTURE_2D, base_color_tex_id.unwrap_or(0));
                 gl::ProgramUniform1ui(program, uniform_location("u_base_color_sampler"), 0);
                 gl::ProgramUniform1ui(
                     program,
                     uniform_location("u_base_color_sampler_exists"),
-                    tex_id.is_some() as u32,
+                    base_color_tex_id.is_some() as u32,
                 );
+
+                gl::ActiveTexture(gl::TEXTURE1);
+                gl::BindTexture(gl::TEXTURE_2D, normal_tex_id.unwrap_or(0));
+                gl::ProgramUniform1ui(program, uniform_location("u_normal_texture"), 1);
+                gl::ProgramUniform1ui(
+                    program,
+                    uniform_location("u_normal_texture_exists"),
+                    normal_tex_id.is_some() as u32,
+                );
+                gl::ProgramUniform1f(program, uniform_location("u_normal_scale"), 0.8);
 
                 gl::UseProgram(program);
 
@@ -711,6 +759,7 @@ const VERTEX_SOURCE: &'static str = "
 layout (location = 0) in vec3 a_pos;
 layout (location = 1) in vec3 a_normal;
 layout (location = 2) in vec2 a_uv;
+layout (location = 3) in vec4 a_tangent;
 
 uniform mat4 u_model;
 uniform mat4 u_view;
@@ -719,13 +768,20 @@ uniform mat4 u_proj;
 out vec3 io_position;
 out vec3 io_light_pos;
 out vec3 io_normal;
-
 out vec2 io_uv;
+out mat3 io_tbn;
 
 void main() {
+
+  vec3 bitangent = cross(a_normal, a_tangent.xyz) * a_tangent.w;
+  vec3 view_bitangent = vec3(u_view * u_model * vec4(bitangent, 0.0));
+  vec3 view_normal = vec3(u_view * u_model * vec4(a_normal, 0.0));
+  vec3 view_tangent = vec3(u_view * u_model * vec4(a_tangent.xyz, 0.0));
+  io_tbn = mat3(view_tangent, view_bitangent, view_normal);
+
   io_light_pos = vec3(u_view * vec4(0.0, 2.0, 1.0, 1.0));
   io_position = vec3(u_view * u_model * vec4(a_pos, 1.0));
-  io_normal = vec3(u_view * u_model * vec4(a_normal, 0.0));
+  io_normal = view_normal;
   io_uv = a_uv;
 
   gl_Position = u_proj * u_view * u_model * vec4(a_pos, 1.0);
@@ -738,10 +794,14 @@ const FRAG_SOURCE: &'static str = "
 out vec4 FragColor;
 
 vec4 k_light_color = vec4(1.0, 1.0, 1.0, 1.0);
-uniform vec4 u_object_color;
 
+uniform vec4 u_base_color_factor;
 uniform sampler2D u_base_color_sampler;
 uniform bool u_base_color_sampler_exists;
+
+uniform float u_normal_scale;
+uniform sampler2D u_normal_texture;
+uniform bool u_normal_texture_exists;
 
 float k_ambient_coefficient = 0.4;
 float k_diffuse_coefficient = 0.3;
@@ -752,8 +812,14 @@ in vec3 io_position;
 in vec3 io_light_pos;
 in vec3 io_normal;
 in vec2 io_uv;
+in mat3 io_tbn;
 
 void main() {
+
+    vec3 normal = io_normal;
+    if (u_normal_texture_exists) {
+        normal = io_tbn * texture(u_normal_texture, io_uv).xyz;
+    }
 
     vec3 to_light = normalize(io_light_pos - io_position);
     vec3 to_camera = normalize(-io_position);
@@ -764,13 +830,15 @@ void main() {
     if (!u_base_color_sampler_exists) {
         tex_component = vec4(1.0);
     }
-    vec4 ambient_component = k_ambient_coefficient * u_object_color * tex_component;
+    vec4 ambient_component = k_ambient_coefficient * u_base_color_factor * tex_component;
 
-    vec4 diffuse_component = k_diffuse_coefficient * (u_object_color * k_light_color / dist2) * max(0, dot(io_normal, to_light));
+    vec4 diffuse_component = k_diffuse_coefficient * (u_base_color_factor * k_light_color / dist2) * max(0, dot(normal, to_light));
 
-    vec4 specular_component = k_specular_coefficient * (k_light_color / dist2) * pow(max(0, dot(io_normal, halfway)), k_p);
+    vec4 specular_component = k_specular_coefficient * (k_light_color / dist2) * pow(max(0, dot(normal, halfway)), k_p);
 
-    FragColor = ambient_component + diffuse_component + specular_component;
+    // FragColor = ambient_component + diffuse_component + specular_component;
+    // FragColor = abs(vec4(io_tbn * vec3(0.0, 0.0, 1.0), 1.0));
+    FragColor = vec4(texture(u_normal_texture, io_uv));
 }
 ";
 
